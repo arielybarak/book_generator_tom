@@ -8,6 +8,16 @@ import zipfile
 import shutil
 import json
 import uuid
+import gradio as gr
+import os
+import re
+import trimesh
+import trimesh.creation
+import numpy as np
+import zipfile
+import shutil
+import json
+import uuid
 
 # --- 1. Constants & Mappings (from TOM.ipynb) ---
 HEBREW_MAP = {
@@ -49,6 +59,16 @@ SPECIAL_REPLACEMENTS = {
     'פ': {'default': 'פ', 'dagesh': 'פּ'},
     'ך': {'default': 'ך', 'dagesh': 'ךּ'},
     'ף': {'default': 'ף', 'dagesh': 'ףּ'},
+}
+
+# Mapping for user-friendly dropdown labels (bilingual)
+DISPLAY_MAPPING = {
+    'default': 'Default (no niqqud) / רגיל (ללא ניקוד)',
+    'holam': 'Holam (וֹ) / חולם',
+    'shuruk': 'Shuruk (וּ) / שורוק',
+    'shin': 'Shin (שׁ) / שין ימנית',
+    'sin': 'Sin (שׂ) / שין שמאלית',
+    'dagesh': 'Dagesh (ּ) / דגש',
 }
 
 BRAILLE_DOTS = {
@@ -289,11 +309,29 @@ with gr.Blocks(title="Hebrew Braille STL Generator") as demo:
 
             # SECTION 2: Page Editor (Initially Hidden)
             with gr.Group(visible=False) as section_editor:
-                gr.Markdown("### Step 2: Add Pages")
+                gr.Markdown("### Step 2: Add Pages / הוספת עמודים")
                 
                 with gr.Row():
                     with gr.Column(scale=2):
-                        page_text_input = gr.Textbox(label="Enter Page Text (Hebrew)", lines=5, placeholder="Type content for the new page here...")
+                        # 1. Main Text Input
+                        page_text_input = gr.Textbox(
+                            label="טקסט העמוד (Page Text)", 
+                            lines=3,
+                            placeholder="Type page text here (Hebrew)... / הקלד את טקסט העמוד כאן..."
+                        )
+
+                        # 2. Image Metadata Inputs
+                        with gr.Row():
+                            image_desc_input = gr.Textbox(
+                                label="תיאור הציור (Visual Description)", 
+                                placeholder="Describe the image... / תאור מילולי של התמונה",
+                                lines=2
+                            )
+                            object_class_input = gr.Textbox(
+                                label="סיווג האובייקט (Object Class)", 
+                                placeholder="e.g. 'Dog', 'House' / סוג האובייקט",
+                                lines=2
+                            )
                         
                         # --- Dynamic Disambiguation UI ---
                         current_page_variations = gr.State({})
@@ -304,7 +342,7 @@ with gr.Blocks(title="Hebrew Braille STL Generator") as demo:
                             if not ambiguities:
                                 return
                             
-                            gr.Markdown("#### 🔍 Disambiguation (Select specific form)")
+                            gr.Markdown("#### 🔍 Disambiguation / חידוד אותיות (Select specific form)")
                             with gr.Group():
                                 # chunk into rows of 3
                                 for i in range(0, len(ambiguities), 3):
@@ -312,8 +350,15 @@ with gr.Blocks(title="Hebrew Braille STL Generator") as demo:
                                         for amb in ambiguities[i:i+3]:
                                             idx = amb["index"]
                                             char = amb["char"]
-                                            opts = amb["options"]
+                                            raw_opts = amb["options"]
                                             
+                                            # Map options to (Label, Value) tuples for the Dropdown
+                                            # If no mapping exists, fall back to the raw value
+                                            display_opts = []
+                                            for val in raw_opts:
+                                                label = DISPLAY_MAPPING.get(val, val)
+                                                display_opts.append((label, val))
+
                                             # Closure to capture index
                                             def make_handler(index):
                                                 def handler(val, current_vars):
@@ -322,11 +367,12 @@ with gr.Blocks(title="Hebrew Braille STL Generator") as demo:
                                                 return handler
 
                                             dd = gr.Dropdown(
-                                                choices=opts,
-                                                value="default" if "default" in opts else opts[0],
-                                                label=f"'{char}' @ pos {idx}",
+                                                choices=display_opts,
+                                                value="default" if "default" in raw_opts else raw_opts[0],
+                                                # Bilingual label: e.g. "Char 'ש' (Index 5) / תו 'ש' (מיקום 5)"
+                                                label=f"Char '{char}' (Idx {idx}) / תו '{char}' (מיקום {idx})",
                                                 scale=1,
-                                                min_width=100,
+                                                min_width=150,
                                                 interactive=True
                                             )
                                             dd.change(
@@ -338,14 +384,14 @@ with gr.Blocks(title="Hebrew Braille STL Generator") as demo:
                         # Reset variations when text changes (new text = new indices)
                         page_text_input.change(lambda: {}, outputs=[current_page_variations])
                         
-                        add_page_btn = gr.Button("➕ Add Page to Book")
+                        add_page_btn = gr.Button("➕ Add Page to Book / הוסף עמוד")
                     
                     with gr.Column(scale=1):
-                        pages_list_display = gr.Markdown("No pages added yet.")
+                        pages_list_display = gr.Markdown("No pages added yet. / עדיין לא נוספו עמודים")
                 
                 gr.Markdown("---")
-                generate_btn = gr.Button("🔨 Generate Braille Book (ZIP)", variant="primary")
-                output_file_wizard = gr.File(label="Download Result")
+                generate_btn = gr.Button("🔨 Generate Braille Book (ZIP) / צור ספר ברייל", variant="primary")
+                output_file_wizard = gr.File(label="Download Result / הורד תוצאה")
 
             # --- Event Handlers ---
 
@@ -364,13 +410,15 @@ with gr.Blocks(title="Hebrew Braille STL Generator") as demo:
                 outputs=[section_setup, section_editor, book_state]
             )
 
-            def add_page(text, variations, current_state):
+            def add_page(text, img_desc, obj_class, variations, current_state):
                 if not text:
-                    return current_state, f"**Pages:** {len(current_state['pages'])} pages added.", ""
+                    return current_state, f"**Pages:** {len(current_state['pages'])} pages added.", "", "", ""
                 
                 new_page_num = len(current_state["pages"]) + 1
                 new_page = {
                     "raw_text": text,
+                    "image_description": img_desc,
+                    "object_class": obj_class,
                     "variations": variations,
                     "page_number": new_page_num
                 }
@@ -378,14 +426,14 @@ with gr.Blocks(title="Hebrew Braille STL Generator") as demo:
                 
                 # Update display list
                 preview = "\n".join([f"{i+1}. {p['raw_text'][:30]}..." for i, p in enumerate(current_state['pages'])])
-                display_text = f"**Total Pages:** {len(current_state['pages'])}\n\n{preview}"
+                display_text = f"**Total Pages / סך הכל עמודים:** {len(current_state['pages'])}\n\n{preview}"
                 
-                return current_state, display_text, "" # Return state, display string, and clear input
+                return current_state, display_text, "", "", "" # Clear all inputs
 
             add_page_btn.click(
                 add_page,
-                inputs=[page_text_input, current_page_variations, book_state],
-                outputs=[book_state, pages_list_display, page_text_input]
+                inputs=[page_text_input, image_desc_input, object_class_input, current_page_variations, book_state],
+                outputs=[book_state, pages_list_display, page_text_input, image_desc_input, object_class_input]
             )
 
             def finish_and_generate(current_state):
