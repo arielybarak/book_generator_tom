@@ -1,12 +1,12 @@
 torch
 diffusers
-opencv-python
+opencv-contrib-python
 pillow
 ezdxf
 cadquery
 pyclipper
-trimesh
 gradio
 deep-translator
 numpy
 matplotlib
+pyyaml

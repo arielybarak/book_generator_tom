@@ -1,0 +1,51 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# TOM — Tactile Book Generator Configuration
+# All physical dimensions are in millimetres unless noted.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Base plate (the flat backing every page is printed on)
+plate:
+  width_mm: 150.0
+  height_mm: 150.0
+  thickness_mm: 1.5
+  corner_radius_mm: 10.0
+
+# Raised Hebrew text layer (for sighted adults)
+text:
+  extrusion_height_mm: 1.5
+
+# Raised image layer (line-art strokes)
+image_strokes:
+  width_mm: 1.0       # total stroke width — min ~1mm for FDM printing
+  height_mm: 1.5
+
+# Braille dome layer (for the child)
+braille:
+  dome_height_ratio: 0.5    # dome height = circle_radius × ratio
+
+# Optional mounting holes (disabled by default)
+mounting_holes:
+  enabled: false
+  radius_mm: 2.0
+  count: 3
+  margin_right_mm: 7.0
+  margin_top_mm: 20.0
+  spacing_mm: 50.0
+
+# Stable Diffusion image generation
+stable_diffusion:
+  model_id: "segmind/SSD-1B"
+  inference_steps: 25
+  guidance_scale: 8.5
+
+# DXF export canvas size
+dxf:
+  canvas_cm: 150
+
+# Advanced geometry tolerances (change only if you know what you're doing)
+geometry:
+  point_clean_tol_mm: 0.02      # remove near-duplicate polygon points
+  clipper_clean_tol_mm: 0.05    # pyclipper CleanPolygon tolerance
+  pyclipper_scale: 1000.0       # integer scaling factor for pyclipper
+  skeletonization_min_area_px: 15   # noise speck threshold after thinning
+  polygon_simplification_epsilon: 1.0  # approxPolyDP epsilon (pixels)

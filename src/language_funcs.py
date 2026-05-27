@@ -1,174 +1,197 @@
-# Imports
+"""
+Hebrew and Braille language utilities.
+
+Responsibilities:
+- HEBREW_MAP / SPECIAL_REPLACEMENTS / DISPLAY_MAPPING: character-level constants
+- hebrew_translator(): Google Translate Hebrew → English
+- convert_to_braille(): Hebrew string → Unicode Braille string
+- apply_variations(): apply user-selected nikud (vowel marks) to a Hebrew string
+- check_ambiguities(): find ambiguous characters in a string (feeds Gradio dropdowns)
+- add_nikud(): interactive CLI version of nikud disambiguation (uses input())
+"""
 from deep_translator import GoogleTranslator
 import re
 
+# ── Nikud / vowel-mark Unicode constants ──────────────────────────────────────
+DAGESH   = 'ּ'
+HIRIK    = 'ִ'
+HOLAM    = 'ֹ'
+SHURUK   = 'ֻ'
+SHIN_DOT = 'ׂ'
 
-# functions
+# ── Hebrew → Braille character maps ───────────────────────────────────────────
+HEBREW_MAP = {
+    'א': '⠁', 'ב': '⠧', 'ג': '⠛', 'ד': '⠙', 'ה': '⠓',
+    'ו': '⠺', 'ז': '⠵', 'ח': '⠭', 'ט': '⠞', 'י': '⠚',
+    'כ': '⠡', 'ל': '⠇', 'מ': '⠍', 'נ': '⠝', 'ס': '⠎',
+    'ע': '⠫', 'פ': '⠋', 'צ': '⠮', 'ק': '⠟', 'ר': '⠗',
+    'ש': '⠩', 'ת': '⠹', 'ך': '⠡', 'ם': '⠍', 'ן': '⠝',
+    'ף': '⠋', 'ץ': '⠮',
+}
+
+HEBREW_DAGESH_MAP = {
+    'ב': '⠃',  # B with dagesh
+    'כ': '⠅',  # K with dagesh
+    'פ': '⠏',  # P with dagesh
+}
+
+VOWEL_TO_BRAILLE = {
+    HOLAM:  '⠕',  # ו with holam
+    SHURUK: '⠥',  # ו with shuruk
+    HIRIK:  '⠊',  # י with hirik
+}
+
+# ── Disambiguation: characters that need user clarification ───────────────────
+# Used by the Gradio UI to offer vowel-mark dropdowns.
+SPECIAL_REPLACEMENTS = {
+    'ו': {'default': 'ו', 'holam': 'ו' + HOLAM, 'shuruk': 'ו' + SHURUK},
+    'ש': {'shin': 'ש' + SHIN_DOT, 'sin': 'שׂ'},
+    'ב': {'default': 'ב', 'dagesh': 'ב' + DAGESH},
+    'כ': {'default': 'כ', 'dagesh': 'כ' + DAGESH},
+    'פ': {'default': 'פ', 'dagesh': 'פ' + DAGESH},
+    'ך': {'default': 'ך', 'dagesh': 'ך' + DAGESH},
+    'ף': {'default': 'ף', 'dagesh': 'ף' + DAGESH},
+}
+
+# Human-readable Hebrew labels for the Gradio dropdowns
+DISPLAY_MAPPING = {
+    'default': 'רגיל (ללא ניקוד)',
+    'holam':   'חולם (וֹ)',
+    'shuruk':  'שורוק (וּ)',
+    'shin':    'שין ימנית (שׁ)',
+    'sin':     'שין שמאלית (שׂ)',
+    'dagesh':  'דגש (ּ)',
+}
+
+
+# ── Translation ────────────────────────────────────────────────────────────────
+
 def hebrew_translator(user_prompt):
-    """
-    function for testing whether user's input is in Hebrew or in English - if it's
-    in Hebrew then it will translate it to English
-    :param user_prompt:
-    :return:
-    """
-    contains_hebrew = re.search(r"[\u0590-\u05FF]", user_prompt) is not None
+    """Translate Hebrew → English; pass through if already English."""
+    if not user_prompt:
+        return ""
+    contains_hebrew = re.search(r"[֐-׿]", user_prompt) is not None
     if contains_hebrew:
-        return GoogleTranslator(source='auto', target='en').translate(user_prompt)
-    else:
-        prompt_en = user_prompt
+        try:
+            return GoogleTranslator(source='auto', target='en').translate(user_prompt)
+        except Exception as e:
+            print(f"Translation error: {e}")
+            return user_prompt
+    return user_prompt
 
-    return prompt_en
+
+# ── Nikud (CLI only) ──────────────────────────────────────────────────────────
 
 def add_nikud(text):
     """
-    מוסיפה סימנים לוגיים (יוניקוד) לפי בחירת המשתמש:
-    ב כ פ – דגש
-    ו – חולם / שורוק / רגיל
-    י – עם חיריק / בלי
-    ש – s או sh
+    Interactively prompt for vowel marks via input().
+    Only works in CLI / notebook contexts, not in Gradio.
+    Use apply_variations() for programmatic/UI contexts.
     """
-
     result = ""
-
     for ch in text:
-
-        # ב כ פ – דגש
         if ch in ('ב', 'כ', 'פ'):
             ans = input(f"האם האות '{ch}' היא עם דגש? (כן/לא) ").strip().lower()
             result += ch
             if ans == 'כן':
                 result += DAGESH
-
-        # ו – חולם / שורוק / רגיל
         elif ch == 'ו':
-            ans = input(
-                "האם זו ו עם חולם vo / שורוק vu / רגיל v? (חו/ש/ר) "
-            ).strip().lower()
-
+            ans = input("האם זו ו עם חולם vo / שורוק vu / רגיל v? (חו/ש/ר) ").strip().lower()
             result += ch
             if ans == 'חו':
                 result += HOLAM
             elif ans == 'ש':
                 result += SHURUK
-
-        # י – חיריק
         elif ch == 'י':
             ans = input("האם זו י עם חיריק yi ? (כן/לא) ").strip().lower()
             result += ch
             if ans == 'כן':
                 result += HIRIK
-
-        # ש – s או sh
         elif ch == 'ש':
-          ans = input("האם זו שׂ (s)? (כן/לא) ").strip().lower()
-          result += ch
-          if ans == 'כן':
-              result += SHIN_DOT
-
-        # שאר האותיות
+            ans = input("האם זו שׂ (s)? (כן/לא) ").strip().lower()
+            result += ch
+            if ans == 'כן':
+                result += SHIN_DOT
         else:
             result += ch
-
     return result
 
-# Braille
-DAGESH = '\u05BC'
-HIRIK = '\u05B4'
-HOLAM = '\u05B9'
-SHURUK = '\u05BB'
-SHIN_DOT = '\u05C2'
 
-HEBREW_MAP = {
-    'א': '⠁',
-    'ב': '⠧',
-    'ג': '⠛',
-    'ד': '⠙',
-    'ה': '⠓',
-    'ו': '⠺',   # ו רגילה
-    'ז': '⠵',
-    'ח': '⠭',
-    'ט': '⠞',
-    'י': '⠚',
-    'כ': '⠡',
-    'ל': '⠇',
-    'מ': '⠍',
-    'נ': '⠝',
-    'ס': '⠎',
-    'ע': '⠫',
-    'פ': '⠋', #f
-    'צ': '⠮',
-    'ק': '⠟',
-    'ר': '⠗',
-    'ש': '⠩',  #sh
-    'ת': '⠹',
-    'ך': '⠡',
-    'ם': '⠍',
-    'ן': '⠝',
-    'ף': '⠋',
-    'ץ': '⠮',
-}
+def apply_variations(raw_text, variations):
+    """
+    Apply user vowel-mark selections (from Gradio UI) to raw Hebrew text.
+    `variations` is a dict of {str(char_index): variant_key}.
+    This is the non-interactive equivalent of add_nikud().
+    """
+    if not variations:
+        return raw_text
+    result_chars = list(raw_text)
+    for index_str, variant_name in variations.items():
+        try:
+            index = int(index_str)
+            if 0 <= index < len(result_chars):
+                char = result_chars[index]
+                if char in SPECIAL_REPLACEMENTS and variant_name in SPECIAL_REPLACEMENTS[char]:
+                    result_chars[index] = SPECIAL_REPLACEMENTS[char][variant_name]
+        except (ValueError, IndexError):
+            continue
+    return "".join(result_chars)
 
-HEBREW_DAGESH_MAP = {
-    'ב': '⠃', #B
-    'כ': '⠅', #K
-    'פ': '⠏', #P
-}
 
-VOWEL_TO_BRAILLE = {
-    HOLAM: '⠕', # ו עם חולם
-    SHURUK: '⠥', # ו עם שורוק
-    HIRIK: '⠊',   # י עם חיריק
-}
+def check_ambiguities(text):
+    """
+    Return a list of characters in `text` that need vowel-mark disambiguation.
+    Each entry: {"index": int, "char": str, "options": [str, ...]}.
+    Used by the Gradio UI to render per-character dropdowns.
+    """
+    ambiguities = []
+    if not text:
+        return ambiguities
+    for i, char in enumerate(text):
+        if char in SPECIAL_REPLACEMENTS:
+            ambiguities.append({
+                "index": i,
+                "char": char,
+                "options": list(SPECIAL_REPLACEMENTS[char].keys()),
+            })
+    return ambiguities
+
+
+# ── Braille conversion ─────────────────────────────────────────────────────────
 
 def letter_to_braille(base, marks):
-
-    # שׁ
+    """Convert a single Hebrew base letter + its nikud marks to a Braille character."""
     if base == 'ש':
-      if SHIN_DOT in marks:
-        return '⠱'
-      return HEBREW_MAP['ש']
-
-    # ב כ פ עם דגש
+        return '⠱' if SHIN_DOT in marks else HEBREW_MAP['ש']
     if base in HEBREW_DAGESH_MAP and DAGESH in marks:
         return HEBREW_DAGESH_MAP[base]
-
-    # ו
     if base == 'ו':
-        if HOLAM in marks:
-            return '⠕'
-        if SHURUK in marks:
-            return '⠥'
+        if HOLAM  in marks: return '⠕'
+        if SHURUK in marks: return '⠥'
         return HEBREW_MAP['ו']
-
-    # י
     if base == 'י':
-        if HIRIK in marks:
-            return '⠊'
-        return HEBREW_MAP['י']
-
-    # רגיל
+        return '⠊' if HIRIK in marks else HEBREW_MAP['י']
     return HEBREW_MAP.get(base, base)
 
+
 def convert_to_braille(text):
+    """
+    Convert Hebrew text (with optional nikud) to a Braille Unicode string.
+    Result is reversed so it reads left-to-right for tactile use.
+    """
     result = []
     i = 0
-
     while i < len(text):
         ch = text[i]
-
         if 'א' <= ch <= 'ת':
             base = ch
             marks = []
             i += 1
-
-            # אוספים סימנים לוגיים
-            while i < len(text) and '\u0591' <= text[i] <= '\u05C7':
+            while i < len(text) and '֑' <= text[i] <= 'ׇ':
                 marks.append(text[i])
                 i += 1
-
             result.append(letter_to_braille(base, marks))
         else:
             result.append(ch)
             i += 1
-
-    return "".join(result)
+    return "".join(result[::-1])

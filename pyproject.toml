@@ -1,0 +1,27 @@
+[project]
+name = "book-generator-tom"
+version = "0.1.0"
+description = "Tactile Hebrew storybook generator for blind children — produces 3D-printable pages with line-art, Hebrew text, and Braille."
+requires-python = ">=3.9"
+dependencies = [
+    "torch",
+    "diffusers",
+    "opencv-contrib-python",
+    "pillow",
+    "ezdxf",
+    "cadquery",
+    "pyclipper",
+    "gradio",
+    "deep-translator",
+    "numpy",
+    "matplotlib",
+    "pyyaml",
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]

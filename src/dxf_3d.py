@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """
-3-DXF → 3D STL builder (single file)
+3 DXF files → single 3D-printable STL.
 
-Inputs:
-  --text    DXF with text shapes (solid)
-  --braille DXF with circles (domes)
-  --image   DXF with line-art (strokes from centerlines; open+closed)
+Takes three DXF inputs (text shapes, Braille circles, image line-art) and builds a
+150×150mm base plate with three tactile layers using CadQuery + pyclipper:
+  - Raised text (solid extrusion)
+  - Braille domes (hemisphere per dot)
+  - Image strokes (pyclipper offset of centerlines → extruded ridges)
 
-IMPORTANT FIX:
-  Closed IMAGE paths are NOT stroked using ET_CLOSEDLINE (can create "bands" that look filled).
-  Instead, closed paths are split into segments and each segment is stroked as an OPEN path (ET_OPENROUND).
-  This makes closed sleeve contours behave like "drawn lines" instead of filled solids.
+Key function: create_one_page_stl_from_dxf(txt_dxf, braille_dxf, image_dxf, output)
 
-Requires:
-  ezdxf, cadquery, pyclipper
+Also works as a standalone CLI:
+  python src/dxf_3d.py --text text.dxf --braille braille.dxf --image image.dxf -o page.stl
 
-Example:
-  python dxf_3files_stroke.py --text text.dxf --braille braille.dxf --image image.dxf -o out.stl
+All geometry constants (plate size, stroke width, dome height, tolerances) are loaded
+from config.yaml via src/config.py.
+
+Implementation note: closed image paths are split into open segments and stroked with
+ET_OPENROUND rather than ET_CLOSEDLINE to avoid filled-band artifacts.
 """
 
 import argparse
@@ -31,40 +32,36 @@ from ezdxf.path import make_path
 import cadquery as cq
 import pyclipper
 
+from src.config import cfg
 
 Point = Tuple[float, float]
 CircleDef = Tuple[Tuple[float, float], float]
 
 # =========================
-# Defaults
+# Settings (from config.yaml)
 # =========================
-BASE_WIDTH = 150.0
-BASE_HEIGHT = 150.0
-BASE_THICKNESS = 1.5
-BASE_CORNER_RADIUS = 10.0
+BASE_WIDTH          = cfg["plate"]["width_mm"]
+BASE_HEIGHT         = cfg["plate"]["height_mm"]
+BASE_THICKNESS      = cfg["plate"]["thickness_mm"]
+BASE_CORNER_RADIUS  = cfg["plate"]["corner_radius_mm"]
 
-TEXT_SOLID_HEIGHT = 1.5
+TEXT_SOLID_HEIGHT   = cfg["text"]["extrusion_height_mm"]
 
-# IMAGE STROKE SETTINGS (nozzle 0.4, min line 1mm => default stroke width = 1mm)
-IMAGE_STROKE_WIDTH = 1.0       # total width in mm
-IMAGE_STROKE_HEIGHT = 1.5
+IMAGE_STROKE_WIDTH  = cfg["image_strokes"]["width_mm"]
+IMAGE_STROKE_HEIGHT = cfg["image_strokes"]["height_mm"]
 
-# Cleanup
-POINT_CLEAN_TOL = 0.02         # remove near-duplicate points (mm)
-CLIPPER_CLEAN_TOL = 0.05       # pyclipper CleanPolygon tol (mm)
+DOME_HEIGHT_RATIO   = cfg["braille"]["dome_height_ratio"]
 
-# Braille
-DOME_HEIGHT_RATIO = 0.5        # height = radius * ratio
+POINT_CLEAN_TOL     = cfg["geometry"]["point_clean_tol_mm"]
+CLIPPER_CLEAN_TOL   = cfg["geometry"]["clipper_clean_tol_mm"]
+SCALE               = cfg["geometry"]["pyclipper_scale"]
 
-# Optional mounting holes
-MOUNTING_HOLES_ENABLED = False
-MOUNTING_HOLE_RADIUS = 2.0
-MOUNTING_HOLE_COUNT = 3
-MOUNTING_HOLE_MARGIN_RIGHT = 7.0
-MOUNTING_HOLE_MARGIN_TOP = 20.0
-MOUNTING_HOLE_SPACING = 50.0
-
-SCALE = 1000.0  # pyclipper integer scaling
+MOUNTING_HOLES_ENABLED    = cfg["mounting_holes"]["enabled"]
+MOUNTING_HOLE_RADIUS      = cfg["mounting_holes"]["radius_mm"]
+MOUNTING_HOLE_COUNT       = cfg["mounting_holes"]["count"]
+MOUNTING_HOLE_MARGIN_RIGHT = cfg["mounting_holes"]["margin_right_mm"]
+MOUNTING_HOLE_MARGIN_TOP  = cfg["mounting_holes"]["margin_top_mm"]
+MOUNTING_HOLE_SPACING     = cfg["mounting_holes"]["spacing_mm"]
 
 
 # =========================

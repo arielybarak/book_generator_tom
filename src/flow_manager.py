@@ -1,4 +1,19 @@
+"""
+Multi-page book orchestrator (CLI / programmatic use).
 
+Accepts a list of page dicts and runs the full pipeline for each:
+  Hebrew input → Stable Diffusion image → 3 PNGs → 3 DXFs → STL
+
+Pages are processed atomically — if any step throws, that page's state is not updated.
+Outputs land in books/{book_name}_{timestamp}/.
+
+Main class: FlowManager(book_name, pages)
+  fm = FlowManager("my_book", pages)
+  result = fm.run()
+
+Note: this module uses image_generator.py which calls add_nikud() (interactive input()).
+It is CLI-only — the web app (app/app.py) has its own generation pipeline.
+"""
 
 # ## we want flow manager, the flow manager knows to get a dict:
 # ## pages: array of pages containing {page number:, image_description:, image_classification:,
