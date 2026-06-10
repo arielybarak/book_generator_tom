@@ -14,19 +14,9 @@ Key functions:
 - generate_page_assets(page_data, output_dir): runs the full pipeline for one page
 - process_book(book_state): loops over all pages, zips outputs, returns ZIP path
 """
-import gradio as gr
-import os
-import torch
-import numpy as np
-import shutil
-import uuid
-import zipfile
-from pathlib import Path
-from diffusers import AutoPipelineForText2Image
-
 # ── ZeroGPU support ─────────────────────────────────────────────────────────────
-# `spaces` exists only on Hugging Face Spaces. Provide a no-op fallback so the
-# same file still runs locally (plain CPU/GPU) without the dependency.
+# `spaces` MUST be imported before torch/diffusers — it errors if CUDA was already
+# initialized. It exists only on HF Spaces; a no-op fallback keeps local runs working.
 try:
     import spaces
     _ON_ZEROGPU = True
@@ -42,6 +32,16 @@ except ImportError:
             return lambda fn: fn
 
     spaces = _NoSpaces()
+
+import gradio as gr
+import os
+import torch
+import numpy as np
+import shutil
+import uuid
+import zipfile
+from pathlib import Path
+from diffusers import AutoPipelineForText2Image
 
 from src.language_funcs import (
     DISPLAY_MAPPING,
