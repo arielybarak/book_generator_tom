@@ -45,9 +45,9 @@ flowchart TD
 
 ## Deployment
 
-The backend is deployed on **Hugging Face Spaces** (GPU-accelerated). `app/app.py` is the Gradio web app that runs there. A dedicated frontend is planned.
+The backend is deployed on **Hugging Face Spaces** (GPU via ZeroGPU). The Space is its own git repo, included here as the **`hf_space/` submodule** — this is where the deployed app lives. `hf_space/gradio_app.py` is the Gradio web app; it is self-contained (bundles its own `src/`, `config.yaml`, and `requirements.txt`). A dedicated frontend is planned.
 
-> **HF Spaces note:** Spaces expects `app.py` at the repo root. Copy or symlink `app/app.py` to the root, or set the Space entry point in the Space settings.
+> **Editing the Space:** edit inside `hf_space/`, then `git commit` + `git push` from that folder — HF auto-rebuilds on push. The deployed entry point is configured via `app_file: gradio_app.py` in `hf_space/README.md`. The repo-root `src/` is kept for the notebooks and CLI/FlowManager; if you change a `src/` module the app needs, copy it into `hf_space/src/`.
 
 ---
 
@@ -55,15 +55,18 @@ The backend is deployed on **Hugging Face Spaces** (GPU-accelerated). `app/app.p
 
 ```
 book_generator_tom/
-├── src/                      # Reusable library modules
+├── src/                      # Library modules — used by the notebooks & CLI/FlowManager
 │   ├── language_funcs.py     # Hebrew ↔ Braille, translation, nikud disambiguation
 │   ├── image_funcs.py        # Image processing, PNG → DXF, font setup
 │   ├── image_generator.py    # Stable Diffusion pipeline wrapper
 │   ├── dxf_3d.py             # 3 DXF files → single STL (CadQuery + pyclipper)
 │   ├── flow_manager.py       # Multi-page book orchestrator (CLI use)
 │   └── config.py             # Loads config.yaml and exposes `cfg` dict
-├── app/
-│   └── app.py                # Gradio web app — primary entry point
+├── hf_space/                 # Hugging Face Space (git submodule) — the deployed app
+│   ├── gradio_app.py         # Gradio web app — primary entry point (runs on HF)
+│   ├── src/                  # Self-contained snapshot of src/ for deployment
+│   ├── config.yaml           # Self-contained snapshot of config.yaml
+│   └── requirements.txt      # App deps (includes `spaces` for ZeroGPU)
 ├── notebooks/
 │   └── text2stl_generator.ipynb   # Step-by-step dev/research notebook (one page)
 ├── config.yaml               # All geometry, SD, and DXF constants (edit here, not in code)
@@ -75,9 +78,12 @@ book_generator_tom/
 
 ## Running locally
 
+The app lives in the `hf_space/` submodule and is self-contained:
+
 ```bash
-pip install -r requirements.txt
-python app/app.py
+pip install -r hf_space/requirements.txt
+cd hf_space
+python gradio_app.py
 ```
 
 Open the Gradio URL in your browser:

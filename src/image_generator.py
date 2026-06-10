@@ -8,7 +8,7 @@ Responsibilities:
   Uses add_nikud() which calls input() — CLI-only, not suitable for web context.
 - images_to_dxf(): converts the three PNGs produced by create_images() to DXF files.
 
-Note: the web app (app/app.py) has its own SD pipeline and does NOT use this module.
+Note: the web app (hf_space/gradio_app.py) has its own SD pipeline and does NOT use this module.
 """
 import torch
 import cv2

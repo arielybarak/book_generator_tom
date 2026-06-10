@@ -6,13 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TOM generates **3D-printable tactile storybook pages** for blind children. The project was initiated with Eliya, an Israeli organization supporting blind children. Each page combines an AI-generated line-art image, raised Hebrew text (for a sighted adult reading alongside), and Braille (for the child) — all merged into a single STL file with distinct tactile height layers.
 
-The backend is deployed on **Hugging Face Spaces** (GPU). `app/app.py` is the Gradio app that runs there. A dedicated frontend is planned. The notebooks are for development and experimentation only.
+The backend is deployed on **Hugging Face Spaces** (GPU via ZeroGPU). The Space is its own git repo, vendored here as the **`hf_space/` submodule**; `hf_space/gradio_app.py` is the Gradio app that runs there. A dedicated frontend is planned. The notebooks are for development and experimentation only.
 
 ## Running the app
 
 ```bash
-pip install -r requirements.txt
-python app/app.py          # Gradio web UI
+pip install -r hf_space/requirements.txt
+cd hf_space && python gradio_app.py     # Gradio web UI (self-contained)
 ```
 
 The font (`NotoSansSymbols2-Regular.ttf`) auto-downloads on first run via `ensure_font()` in `src/image_funcs.py`.
@@ -30,7 +30,7 @@ Hebrew input
 
 `src/flow_manager.py` wraps this for multi-page books. Pages are processed atomically — if any step throws, that page's state is not updated. Outputs land in `books/{name}_{timestamp}/`.
 
-`app/app.py` is the primary entry point. It imports from `src/` and adds the Gradio UI layer. It currently outputs DXF + PNG per page (ZIP download) — **STL generation via `src/dxf_3d.py` is not yet wired into the app**.
+`hf_space/gradio_app.py` is the primary entry point. It imports from `src/` and adds the Gradio UI layer. The full pipeline is wired: per page it generates the image PNG, three DXFs (image/text/braille), and the final STL via `create_one_page_stl_from_dxf()`, then returns a ZIP. SD inference runs under a `@spaces.GPU` decorator (ZeroGPU); translation, DXF, and STL stay on CPU.
 
 ## Module responsibilities
 
@@ -58,7 +58,9 @@ from src.image_funcs import ensure_font, process_image_to_dxf
 
 ## HF Spaces deployment note
 
-Hugging Face Spaces expects `app.py` at the repo root. When deploying, copy or symlink `app/app.py` to the root, or configure the Space entry point. `app_colab.ipynb` is the same app adapted to run on Colab with `share=True`.
+The app is **canonical in the `hf_space/` submodule** (HF Space repo: `MLightning/text2STL-engine-2.0-superMX-bottom`). It is self-contained — `hf_space/` bundles its own copies of `gradio_app.py`, `src/`, `config.yaml`, and `requirements.txt`. To change the app: edit inside `hf_space/`, then `git commit` + `git push` from that folder; HF auto-rebuilds. The entry point is set by `app_file: gradio_app.py` in `hf_space/README.md` (HF no longer requires the literal name `app.py`).
+
+The repo-root `src/` is kept for the notebooks and CLI/FlowManager. `hf_space/` vendors a **copy** of `src/` + `config.yaml` (HF Spaces must be self-contained), so the two can drift. **After changing any `src/` module or `config.yaml` the app uses, run `./sync_to_space.sh`** from the repo root — it mirrors `src/` and `config.yaml` into `hf_space/` (rsync `--delete`, skips `__pycache__`). Then commit + push from inside `hf_space/` to redeploy.
 
 ## opencv dependency
 

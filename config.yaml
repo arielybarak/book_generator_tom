@@ -42,6 +42,22 @@ stable_diffusion:
 dxf:
   canvas_cm: 150
 
+# Lithophane-style STL variant (experimental — used by gradio_app_lithophane.py).
+# Flattens all three layers into one grayscale heightmap, then meshes it directly
+# (no CadQuery). Positive relief: background = flat base, brighter = taller.
+lithophane:
+  resolution_px: 256          # heightmap canvas (square); ~262k triangles, ~13MB STL
+  base_thickness_mm: 1.5      # solid base under the relief
+  relief_height_mm: 2.0       # max Z above base (gray 255 maps here)
+  layout:                     # vertical bands on the plate (fractions, no overlap)
+    text_frac: 0.18           # top band    → Hebrew text
+    braille_frac: 0.18        # bottom band  → Braille
+    # image fills the remaining middle band
+  levels:                     # gray level (0-255) per layer = its relative height
+    image: 150                # ~1.5mm raised line-art
+    text: 150                 # ~1.5mm raised Hebrew text
+    braille: 255              # ~2.0mm, tallest (flat-top bumps in v1)
+
 # Advanced geometry tolerances (change only if you know what you're doing)
 geometry:
   point_clean_tol_mm: 0.02      # remove near-duplicate polygon points

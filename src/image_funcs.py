@@ -13,12 +13,16 @@ Responsibilities:
 """
 import os
 import uuid
+import urllib.request
 import torch
 import cv2
 import numpy as np
 import ezdxf
+import matplotlib
+matplotlib.use("Agg")  # headless, thread-safe backend (no GUI / no global event loop)
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+from matplotlib.figure import Figure
 from PIL import Image
 
 FONT_FILENAME = "NotoSansSymbols2-Regular.ttf"
@@ -33,12 +37,11 @@ def ensure_font(font_path=None):
     if not os.path.exists(path):
         try:
             print(f"Downloading Braille font to {path}...")
-            os.system(f'wget -q -O "{path}" {FONT_URL}')
+            urllib.request.urlretrieve(FONT_URL, path)
         except Exception as e:
             print(f"Font download failed: {e}")
             return
     fm.fontManager.addfont(path)
-    plt.rcParams['font.family'] = 'Noto Sans Symbols2'
 
 
 # ── Tensor → PIL ───────────────────────────────────────────────────────────────
@@ -198,14 +201,14 @@ def generate_hebrew_text_dxf(hebrew_text, output_path):
     Hebrew is RTL so the string is reversed before rendering.
     """
     temp_img = f"temp_hebrew_{uuid.uuid4()}.png"
-    plt.figure(figsize=(5, 2))
-    plt.gca().set_facecolor("white")
-    plt.text(0.5, 0.5, hebrew_text[::-1], fontsize=36, color='black',
-             ha='center', va='center', fontweight='normal', fontname='DejaVu Sans')
-    plt.axis("off")
-    plt.savefig(temp_img, dpi=300, bbox_inches="tight", pad_inches=0.1,
+    fig = Figure(figsize=(5, 2), facecolor="white")
+    ax = fig.add_subplot(111)
+    ax.set_facecolor("white")
+    ax.text(0.5, 0.5, hebrew_text[::-1], fontsize=36, color='black',
+            ha='center', va='center', fontweight='normal', fontname='DejaVu Sans')
+    ax.axis("off")
+    fig.savefig(temp_img, dpi=300, bbox_inches="tight", pad_inches=0.1,
                 facecolor='white')
-    plt.close()
 
     try:
         img = cv2.imread(temp_img, cv2.IMREAD_GRAYSCALE)
@@ -222,13 +225,13 @@ def generate_braille_dxf_from_text(braille_text, output_path):
     the dot blobs and export their centres as DXF circles.
     """
     # Render Braille to a temp PNG
-    plt.figure(figsize=(3.9, 3.9))
-    plt.text(0.5, 0.5, braille_text, fontsize=30, color='black',
-             ha='center', va='center', fontweight='light', fontname='Noto Sans Symbols2')
-    plt.axis("off")
     temp_img = f"temp_braille_{uuid.uuid4()}.png"
-    plt.savefig(temp_img, dpi=300, bbox_inches="tight", pad_inches=0)
-    plt.close()
+    fig = Figure(figsize=(3.9, 3.9), facecolor="white")
+    ax = fig.add_subplot(111)
+    ax.text(0.5, 0.5, braille_text, fontsize=30, color='black',
+            ha='center', va='center', fontweight='light', fontname='Noto Sans Symbols2')
+    ax.axis("off")
+    fig.savefig(temp_img, dpi=300, bbox_inches="tight", pad_inches=0)
 
     img = cv2.imread(temp_img, cv2.IMREAD_GRAYSCALE)
     if img is None:
