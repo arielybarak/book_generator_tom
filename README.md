@@ -5,7 +5,7 @@ colorFrom: green
 colorTo: indigo
 sdk: gradio
 sdk_version: 6.3.0
-app_file: app.py
+app_file: gradio_app.py
 pinned: false
 short_description: text2STL-engine
 ---

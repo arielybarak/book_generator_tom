@@ -1,3 +1,13 @@
-numpy
-trimesh
+torch
+diffusers
+opencv-contrib-python
+pillow
+ezdxf
+cadquery
+pyclipper
 gradio
+deep-translator
+numpy
+matplotlib
+pyyaml
+spaces
