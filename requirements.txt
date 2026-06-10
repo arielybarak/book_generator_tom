@@ -1,5 +1,7 @@
 torch
 diffusers
+transformers
+accelerate
 opencv-contrib-python
 pillow
 ezdxf
