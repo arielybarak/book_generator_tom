@@ -332,6 +332,42 @@ with gr.Blocks(title="Hebrew Braille Book Generator") as demo:
 
     generate_btn.click(process_book, inputs=[book_state], outputs=[output_file_wizard])
 
+    # ── Hidden API for the external website (web/) — not shown in the Gradio UI ───
+    # A stable endpoint the React frontend calls via @gradio/client. It reuses the
+    # existing single-page pipeline and returns the illustration PNG + the STL as
+    # served file URLs. Wiring real gr.Image/gr.File OUTPUTS (rather than a bare
+    # gr.api) guarantees Gradio serves the files as fetchable URLs.
+    web_text  = gr.Textbox(visible=False)
+    web_vars  = gr.JSON(visible=False)          # {char_index: variant_key}
+    web_desc  = gr.Textbox(visible=False)
+    web_class = gr.Textbox(visible=False)
+    web_out_img = gr.Image(visible=False, type="filepath")
+    web_out_stl = gr.File(visible=False)
+    web_btn   = gr.Button(visible=False)
+
+    def generate_page_web(raw_text, variations, image_desc, object_class):
+        page = {
+            "page_number": 1,
+            "raw_text": raw_text or "",
+            "image_description": image_desc or "",
+            "object_class": object_class or "",
+            "variations": variations or {},
+        }
+        work_dir = os.path.join("temp_gen", str(uuid.uuid4()))
+        os.makedirs(work_dir, exist_ok=True)
+        # generate_page_assets here returns [dxf_img, dxf_braille, dxf_text, stl, png]
+        _dxf_img, _dxf_braille, _dxf_text, stl_path, img_path = generate_page_assets(
+            page, work_dir
+        )
+        return img_path, stl_path
+
+    web_btn.click(
+        generate_page_web,
+        inputs=[web_text, web_vars, web_desc, web_class],
+        outputs=[web_out_img, web_out_stl],
+        api_name="generate_page",
+    )
+
 
 if __name__ == "__main__":
     demo.launch()
