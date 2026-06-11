@@ -45,9 +45,30 @@ flowchart TD
 
 ## Deployment
 
-The backend is deployed on **Hugging Face Spaces** (GPU via ZeroGPU). The Space is its own git repo, included here as the **`hf_space/` submodule** — this is where the deployed app lives. `hf_space/gradio_app.py` is the Gradio web app; it is self-contained (bundles its own `src/`, `config.yaml`, and `requirements.txt`). A dedicated frontend is planned.
+### Backend — Hugging Face Spaces
 
-> **Editing the Space:** edit inside `hf_space/`, then `git commit` + `git push` from that folder — HF auto-rebuilds on push. The deployed entry point is configured via `app_file: gradio_app.py` in `hf_space/README.md`. The repo-root `src/` is kept for the notebooks and CLI/FlowManager; if you change a `src/` module the app needs, copy it into `hf_space/src/`.
+The backend runs on **Hugging Face Spaces** (GPU via ZeroGPU). The Space is its own git repo, included here as the **`hf_space/` submodule**. `hf_space/gradio_app_lithophane.py` is the deployed entry point (lithophane variant with the public API); it is self-contained (bundles its own `src/`, `config.yaml`, `requirements.txt`).
+
+> **Editing the Space:** edit inside `hf_space/`, then `git commit` + `git push` from that folder — HF auto-rebuilds on push. The repo-root `src/` is kept for the notebooks and CLI/FlowManager; run `./sync_to_space.sh` to mirror changes into `hf_space/`.
+
+### Frontend — React web app
+
+A public-facing Hebrew website lives in `web/` — React 19 + Vite + Tailwind v4, deployed to **Vercel**. Parents and teachers use it; no technical background assumed.
+
+```bash
+cd web && npm install && npm run dev   # http://localhost:5173
+```
+
+Set `VITE_HF_SPACE` to the HF Space id before running (see `web/.env.example`). The frontend talks exclusively to the `/generate_page` endpoint on the HF Space.
+
+#### `/generate_page` API contract
+
+| | |
+|---|---|
+| **Inputs** | `raw_text` (Hebrew), `variations` (nikud choices JSON), `image_desc`, `object_class` |
+| **Outputs** | `image` (PNG file URL), `stl` (STL file URL) |
+
+Deploy frontend: connect `web/` to a Vercel project, set env var `VITE_HF_SPACE`, auto-deploys on `git push`.
 
 ---
 
@@ -62,13 +83,23 @@ book_generator_tom/
 │   ├── dxf_3d.py             # 3 DXF files → single STL (CadQuery + pyclipper)
 │   ├── flow_manager.py       # Multi-page book orchestrator (CLI use)
 │   └── config.py             # Loads config.yaml and exposes `cfg` dict
-├── hf_space/                 # Hugging Face Space (git submodule) — the deployed app
-│   ├── gradio_app.py         # Gradio web app — primary entry point (runs on HF)
+├── web/                      # React frontend (React 19 + Vite + Tailwind v4) → Vercel
+│   ├── src/
+│   │   ├── App.jsx           # 4-step flow: Landing → BookBuilder → Generate → Download
+│   │   ├── api/hfClient.js   # Gradio client → /generate_page endpoint
+│   │   ├── components/       # Stepper, NikudChooser, StlViewer, GenerateStep, …
+│   │   ├── lib/copy.js       # All Hebrew UI strings (no jargon)
+│   │   └── lib/nikud.js      # Nikud choices — must mirror SPECIAL_REPLACEMENTS in src/
+│   └── CLAUDE.md             # Frontend-specific conventions (RTL, API contract, glossary)
+├── hf_space/                 # Hugging Face Space (git submodule) — the deployed backend
+│   ├── gradio_app_lithophane.py   # Deployed entry point (lithophane + /generate_page API)
+│   ├── gradio_app.py         # Alternate variant (non-lithophane)
 │   ├── src/                  # Self-contained snapshot of src/ for deployment
 │   ├── config.yaml           # Self-contained snapshot of config.yaml
 │   └── requirements.txt      # App deps (includes `spaces` for ZeroGPU)
 ├── notebooks/
 │   └── text2stl_generator.ipynb   # Step-by-step dev/research notebook (one page)
+├── .claude/                  # Claude Code tooling: skills/ (slash commands) + instructions/
 ├── config.yaml               # All geometry, SD, and DXF constants (edit here, not in code)
 ├── requirements.txt
 └── pyproject.toml

@@ -6,13 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TOM generates **3D-printable tactile storybook pages** for blind children. The project was initiated with Eliya, an Israeli organization supporting blind children. Each page combines an AI-generated line-art image, raised Hebrew text (for a sighted adult reading alongside), and Braille (for the child) — all merged into a single STL file with distinct tactile height layers.
 
-The backend is deployed on **Hugging Face Spaces** (GPU via ZeroGPU). The Space is its own git repo, vendored here as the **`hf_space/` submodule**; `hf_space/gradio_app.py` is the Gradio app that runs there. A dedicated frontend is planned. The notebooks are for development and experimentation only.
+The backend is deployed on **Hugging Face Spaces** (GPU via ZeroGPU). The Space is its own git repo, vendored here as the **`hf_space/` submodule**; `hf_space/gradio_app_lithophane.py` is the deployed entry point. The public-facing React frontend lives in `web/` (React 19 + Vite + Tailwind v4, deployed to Vercel). The notebooks are for development and experimentation only.
 
 ## Running the app
 
 ```bash
+# Backend (Gradio, self-contained)
 pip install -r hf_space/requirements.txt
-cd hf_space && python gradio_app.py     # Gradio web UI (self-contained)
+cd hf_space && python gradio_app_lithophane.py
+
+# Frontend (React)
+cd web && npm install && npm run dev   # http://localhost:5173  (needs VITE_HF_SPACE env var)
 ```
 
 The font (`NotoSansSymbols2-Regular.ttf`) auto-downloads on first run via `ensure_font()` in `src/image_funcs.py`.
@@ -30,7 +34,7 @@ Hebrew input
 
 `src/flow_manager.py` wraps this for multi-page books. Pages are processed atomically — if any step throws, that page's state is not updated. Outputs land in `books/{name}_{timestamp}/`.
 
-`hf_space/gradio_app.py` is the primary entry point. It imports from `src/` and adds the Gradio UI layer. The full pipeline is wired: per page it generates the image PNG, three DXFs (image/text/braille), and the final STL via `create_one_page_stl_from_dxf()`, then returns a ZIP. SD inference runs under a `@spaces.GPU` decorator (ZeroGPU); translation, DXF, and STL stay on CPU.
+`hf_space/gradio_app_lithophane.py` is the primary deployed entry point. It imports from `src/` and adds the Gradio UI layer plus a hidden `/generate_page` API endpoint used by the web frontend. The full pipeline is wired: per page it generates the image PNG, three DXFs (image/text/braille), and the final STL via `create_one_page_stl_from_dxf()`, then returns a ZIP. SD inference runs under a `@spaces.GPU` decorator (ZeroGPU); translation, DXF, and STL stay on CPU.
 
 ## Module responsibilities
 
@@ -48,20 +52,26 @@ All geometry is controlled by module-level constants:
 - `IMAGE_STROKE_WIDTH / IMAGE_STROKE_HEIGHT` — 1.0mm / 1.5mm for image ridges
 - `DOME_HEIGHT_RATIO` — Braille dome height = radius × 0.5
 
-## Import convention
+## web/ frontend
 
-All `src/` imports use the `src.` prefix. Always run scripts from the repo root:
-```python
-from src import language_funcs as lf
-from src.image_funcs import ensure_font, process_image_to_dxf
-```
+`web/` is a React 19 + Vite + Tailwind v4 SPA — the public Hebrew face of TOM. Its own conventions and API contract are in `web/CLAUDE.md`. Key points for the main repo:
+
+- **API**: the frontend speaks only to `/generate_page` on the HF Space. Inputs: `[raw_text, variations, image_desc, object_class]`. Outputs: `[image_url, stl_url]`.
+- **nikud sync**: `web/src/lib/nikud.js` option keys must mirror `SPECIAL_REPLACEMENTS` keys in `src/language_funcs.py` (`default`, `holam`, `shuruk`, `shin`, `sin`, `dagesh`). If backend keys change, update `nikud.js` too.
+- **Deploy**: Vercel project root = `web/`, env var `VITE_HF_SPACE` = HF Space id.
+- Does **not** use `sync_to_space.sh` — it never touches `hf_space/src/` directly.
 
 ## HF Spaces deployment note
 
-The app is **canonical in the `hf_space/` submodule** (HF Space repo: `MLightning/text2STL-engine-2.0-superMX-bottom`). It is self-contained — `hf_space/` bundles its own copies of `gradio_app.py`, `src/`, `config.yaml`, and `requirements.txt`. To change the app: edit inside `hf_space/`, then `git commit` + `git push` from that folder; HF auto-rebuilds. The entry point is set by `app_file: gradio_app.py` in `hf_space/README.md` (HF no longer requires the literal name `app.py`).
+The app is **canonical in the `hf_space/` submodule** (HF Space repo: `MLightning/text2STL-engine-2.0-superMX-bottom`). It is self-contained — `hf_space/` bundles its own copies of the app file, `src/`, `config.yaml`, and `requirements.txt`. To change the app: edit inside `hf_space/`, then `git commit` + `git push` from that folder; HF auto-rebuilds. The entry point is `hf_space/gradio_app_lithophane.py` (set via `app_file:` in `hf_space/README.md`).
 
 The repo-root `src/` is kept for the notebooks and CLI/FlowManager. `hf_space/` vendors a **copy** of `src/` + `config.yaml` (HF Spaces must be self-contained), so the two can drift. **After changing any `src/` module or `config.yaml` the app uses, run `./sync_to_space.sh`** from the repo root — it mirrors `src/` and `config.yaml` into `hf_space/` (rsync `--delete`, skips `__pycache__`). Then commit + push from inside `hf_space/` to redeploy.
 
-## opencv dependency
+## Repo AI tooling (`.claude/`)
 
-Use `opencv-contrib-python`, not `opencv-python` — the contrib build includes `cv2.ximgproc.thinning` (Zhang-Suen skeletonization) used in `image_to_dxf_exact()`. Without it, the code falls back to Canny edges (double lines).
+Claude Code reads project-local config from `.claude/`:
+- **`.claude/skills/<name>/SKILL.md`** — project skills (invoked as `/<name>`). Skills **must** live under `.claude/skills/` to be discovered — a repo-root `skills/` folder is ignored. `create-skill` documents how to author new ones (it's adapted from the PAI framework, so read `${PAI_DIR}` as `.claude/` and ignore its `KAI.md`/template references).
+- **`.claude/instructions/python.instructions.md`** — Python conventions applied in this repo.
+
+`.claude/` is currently untracked — `git add` it if you want the team to share these.
+
