@@ -24,8 +24,9 @@ export function GenerateStep({ book, results, setResults, onNext }) {
         },
         (msg) => {
           // queue=true means the Space is still waking or other jobs are ahead
-          const queued = msg?.queue === true || (msg?.position ?? 0) > 0
-          setStatus((s) => ({ ...s, [page.id]: queued ? 'queued' : 'working' }))
+          const waking = msg?.stage === 'waking'
+          const queued = !waking && (msg?.queue === true || (msg?.position ?? 0) > 0)
+          setStatus((s) => ({ ...s, [page.id]: waking ? 'waking' : queued ? 'queued' : 'working' }))
         },
       )
       setResults((r) => ({ ...r, [page.id]: res }))
@@ -83,7 +84,7 @@ export function GenerateStep({ book, results, setResults, onNext }) {
                   <div className="text-center">
                     <Spinner />
                     <p className="text-muted mt-3 text-sm">
-                      {st === 'queued' ? COPY.generate.waking : COPY.generate.working}
+                      {st === 'waking' ? COPY.generate.waking : st === 'queued' ? COPY.generate.waking : COPY.generate.working}
                     </p>
                   </div>
                 )}

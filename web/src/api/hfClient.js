@@ -10,10 +10,24 @@ import { Client } from '@gradio/client'
 const SPACE = import.meta.env.VITE_HF_SPACE || 'MLightning/text2STL-engine-2.0-superMX-bottom'
 
 let _clientPromise = null
-function getClient() {
+
+async function connectWithRetry(onStatus, attempts = 8, delayMs = 5000) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await Client.connect(SPACE)
+    } catch (err) {
+      const sleeping = err?.message?.includes('config') || err?.message?.includes('503')
+      if (!sleeping || i === attempts - 1) throw err
+      onStatus?.({ type: 'status', stage: 'waking', queue: false, position: 0 })
+      await new Promise((r) => setTimeout(r, delayMs))
+    }
+  }
+}
+
+function getClient(onStatus) {
   if (!_clientPromise) {
-    _clientPromise = Client.connect(SPACE).catch((err) => {
-      _clientPromise = null // allow retry after a failed connect (e.g. cold Space)
+    _clientPromise = connectWithRetry(onStatus).catch((err) => {
+      _clientPromise = null
       throw err
     })
   }
@@ -38,7 +52,7 @@ export async function generatePage(
   { text, variations = {}, imageDesc = '', objectClass = '' },
   onStatus,
 ) {
-  const client = await getClient()
+  const client = await getClient(onStatus)
 
   // Positional payload in the endpoint's wired input order.
   const job = client.submit('/generate_page', [text, variations, imageDesc, objectClass])

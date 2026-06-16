@@ -3,6 +3,15 @@ import { Card } from './ui/Card'
 import { StlViewer } from './StlViewer'
 import { COPY } from '../lib/copy'
 
+async function downloadStl(url, filename) {
+  const blob = await fetch(url).then((r) => r.blob())
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 /**
  * Step 4 — preview each finished page in 3D and download its printable STL.
  */
@@ -26,13 +35,12 @@ export default function DownloadStep({ book, results, onRestart }) {
                   עמוד {i + 1} {COPY.common.of} {book.pages.length}
                 </p>
                 <p className="text-ink mb-4 font-semibold">{p.text}</p>
-                <a
-                  href={res.stlUrl}
-                  download={`${safeTitle}_${i + 1}.stl`}
+                <button
+                  onClick={() => downloadStl(res.stlUrl, `${safeTitle}_${i + 1}.stl`)}
                   className="rounded-btn bg-brand shadow-soft hover:bg-brand-dark inline-flex items-center justify-center gap-2 px-6 py-3 font-semibold text-white transition"
                 >
                   <span aria-hidden="true">⬇</span> {COPY.download.download}
-                </a>
+                </button>
               </div>
             </Card>
           )
