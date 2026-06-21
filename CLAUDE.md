@@ -69,9 +69,17 @@ The repo-root `src/` is kept for the notebooks and CLI/FlowManager. `hf_space/` 
 
 ## Repo AI tooling (`.claude/`)
 
-Claude Code reads project-local config from `.claude/`:
-- **`.claude/skills/<name>/SKILL.md`** — project skills (invoked as `/<name>`). Skills **must** live under `.claude/skills/` to be discovered — a repo-root `skills/` folder is ignored. `create-skill` documents how to author new ones (it's adapted from the PAI framework, so read `${PAI_DIR}` as `.claude/` and ignore its `KAI.md`/template references).
-- **`.claude/instructions/python.instructions.md`** — Python conventions applied in this repo.
+Claude Code reads project-local config from `.claude/`. This repo ships a tuned setup:
 
-`.claude/` is currently untracked — `git add` it if you want the team to share these.
+- **Skills** (`.claude/skills/<name>/SKILL.md`, auto-activate on matching work):
+  - `hf-space-sync-deploy` — the sync → push-from-`hf_space/` deploy procedure and its traps.
+  - `tactile-stl-geometry` — page geometry lives in `config.yaml` (via `src/config.py`); keep the three tactile layers distinct and FDM-printable.
+  - `hebrew-braille-nikud` — Hebrew→Braille + nikud; the `SPECIAL_REPLACEMENTS` keys are a contract mirrored in `DISPLAY_MAPPING` and `web/src/lib/nikud.js`.
+  - `image-dxf-generation` — Stable Diffusion line-art → PNG → DXF; needs `opencv-contrib-python`, auto-downloads the Braille font.
+- **Commands** (`/<name>`): `/deploy-hf` (sync → commit → push checklist) · `/check-sync` (vendored-copy + nikud-parity report) · `/new-page` (generate a page/book via `FlowManager` or the `dxf_3d.py` CLI).
+- **Agents** (read-only): `deploy-readiness-reviewer` (pre-deploy GO/NO-GO) · `geometry-auditor` (printability + config-section audit).
+- **Hook**: `.claude/hooks/sync-guard.py` — PostToolUse **advisory** (never blocks): reminds to run `./sync_to_space.sh` after editing repo-root `src/`/`config.yaml`; warns when a vendored `hf_space/` copy is edited directly. Wired in `.claude/settings.json`.
+- **`.claude/instructions/python.instructions.md`** — Python conventions (ruff, `opencv-contrib-python`, `src.` imports, modern typing).
+
+Skills **must** live under `.claude/skills/` to be discovered — a repo-root `skills/` folder is ignored. `.claude/` is currently untracked — `git add` it if you want the team to share these.
 
