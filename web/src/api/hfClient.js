@@ -48,10 +48,7 @@ function fileUrl(item) {
  * @param {(status:object)=>void} [onStatus]  receives queue/progress status messages
  * @returns {Promise<{imageUrl:string|null, stlUrl:string|null}>}
  */
-export async function generatePage(
-  { text, variations = {}, imageDesc = '', objectClass = '' },
-  onStatus,
-) {
+async function _run({ text, variations, imageDesc, objectClass }, onStatus) {
   const client = await getClient(onStatus)
 
   // Positional payload in the endpoint's wired input order.
@@ -66,4 +63,18 @@ export async function generatePage(
   if (!Array.isArray(data)) throw new Error('No data returned from /generate_page')
   const [image, stl] = data
   return { imageUrl: fileUrl(image), stlUrl: fileUrl(stl) }
+}
+
+export async function generatePage(
+  { text, variations = {}, imageDesc = '', objectClass = '' },
+  onStatus,
+) {
+  const args = { text, variations, imageDesc, objectClass }
+  try {
+    return await _run(args, onStatus)
+  } catch {
+    // The cached client may be stale (Space restarted/died). Drop it and reconnect once.
+    _clientPromise = null
+    return await _run(args, onStatus)
+  }
 }

@@ -1,4 +1,5 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
+import { MotionConfig } from 'framer-motion'
 import { Stepper } from './components/Stepper'
 import { Landing } from './components/Landing'
 import { BookBuilder } from './components/BookBuilder'
@@ -8,7 +9,20 @@ import { COPY } from './lib/copy'
 // three.js is ~700 kB — only load it when the user reaches the download step.
 const DownloadStep = lazy(() => import('./components/DownloadStep'))
 
-function Header({ step }) {
+// Persist the whole session so a refresh doesn't wipe the book or generated pages.
+// NOTE: HF file URLs in `results` can expire if the Space restarts — a missing
+// image then falls back to the regenerate path in GenerateStep.
+const STORAGE_KEY = 'tom.v1'
+
+function loadState() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null
+  } catch {
+    return null
+  }
+}
+
+function Header({ step, onStepClick }) {
   return (
     <header className="border-line bg-paper/80 sticky top-0 z-10 border-b backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-4">
@@ -18,52 +32,76 @@ function Header({ step }) {
           </span>
           <span className="text-ink text-xl font-bold">{COPY.appName}</span>
         </div>
-        <Stepper current={step} />
+        <Stepper current={step} onStepClick={onStepClick} />
       </div>
     </header>
   )
 }
 
 export default function App() {
-  const [step, setStep] = useState(0)
-  const [book, setBook] = useState({ title: '', pages: [] })
-  const [results, setResults] = useState({}) // pageId -> { imageUrl, stlUrl }
+  const saved = loadState()
+  const [step, setStep] = useState(saved?.step ?? 0)
+  const [book, setBook] = useState(saved?.book ?? { title: '', pages: [] })
+  const [results, setResults] = useState(saved?.results ?? {}) // pageId -> { imageUrl, stlUrl }
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ step, book, results }))
+    } catch {
+      // ignore quota / private-mode write failures
+    }
+  }, [step, book, results])
 
   function restart() {
+    try {
+      localStorage.removeItem(STORAGE_KEY)
+    } catch {
+      // ignore
+    }
     setBook({ title: '', pages: [] })
     setResults({})
     setStep(0)
   }
 
+  // Navigate back to an already-completed step only (never forward past unvisited work).
+  function goTo(target) {
+    if (target < step) setStep(target)
+  }
+
   return (
-    <div className="flex min-h-dvh flex-col">
-      <Header step={step} />
-      <main className="flex-1" aria-label="תוכן ראשי">
-        {step === 0 && <Landing onStart={() => setStep(1)} />}
-        {step === 1 && <BookBuilder book={book} setBook={setBook} onGenerate={() => setStep(2)} />}
-        {step === 2 && (
-          <GenerateStep
-            book={book}
-            results={results}
-            setResults={setResults}
-            onNext={() => setStep(3)}
-          />
-        )}
-        {step === 3 && (
-          <Suspense
-            fallback={
-              <div className="flex min-h-96 items-center justify-center">
-                <span
-                  className="border-brand-soft border-t-brand inline-block h-10 w-10 animate-spin rounded-full border-4"
-                  aria-label="טוען…"
-                />
-              </div>
-            }
-          >
-            <DownloadStep book={book} results={results} onRestart={restart} />
-          </Suspense>
-        )}
-      </main>
-    </div>
+    <MotionConfig reducedMotion="user">
+      <div className="flex min-h-dvh flex-col">
+        <Header step={step} onStepClick={goTo} />
+        <main className="flex-1" aria-label="תוכן ראשי">
+          {step === 0 && <Landing onStart={() => setStep(1)} />}
+          {step === 1 && (
+            <BookBuilder book={book} setBook={setBook} onGenerate={() => setStep(2)} />
+          )}
+          {step === 2 && (
+            <GenerateStep
+              book={book}
+              results={results}
+              setResults={setResults}
+              onNext={() => setStep(3)}
+              onBack={() => goTo(1)}
+            />
+          )}
+          {step === 3 && (
+            <Suspense
+              fallback={
+                <div className="flex min-h-96 items-center justify-center">
+                  <span
+                    className="border-brand-soft border-t-brand inline-block h-10 w-10 animate-spin rounded-full border-4"
+                    aria-label="טוען…"
+                  />
+                </div>
+              }
+            >
+              <DownloadStep book={book} results={results} onRestart={restart} />
+            </Suspense>
+          )}
+        </main>
+      </div>
+    </MotionConfig>
   )
 }

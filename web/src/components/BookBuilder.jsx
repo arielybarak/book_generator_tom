@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
 import { PageEditor } from './PageEditor'
+import { StepHeading } from './StepHeading'
 import { COPY } from '../lib/copy'
 
 /**
@@ -25,7 +26,7 @@ export function BookBuilder({ book, setBook, onGenerate }) {
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-10">
-      <h1 className="text-ink mb-6 text-3xl font-bold">{COPY.builder.title}</h1>
+      <StepHeading className="text-ink mb-6 text-3xl font-bold">{COPY.builder.title}</StepHeading>
 
       <Card className="mb-6 p-6">
         <label htmlFor="book-name" className="text-ink mb-1 block font-semibold">

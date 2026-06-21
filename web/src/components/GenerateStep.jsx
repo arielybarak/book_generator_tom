@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
+import { StepHeading } from './StepHeading'
 import { generatePage } from '../api/hfClient'
 import { COPY } from '../lib/copy'
 
@@ -8,7 +9,7 @@ import { COPY } from '../lib/copy'
  * Step 3 — generate each page on the backend (sequentially, to be gentle on the
  * shared GPU), show the illustration as it lands, and allow per-page regenerate.
  */
-export function GenerateStep({ book, results, setResults, onNext }) {
+export function GenerateStep({ book, results, setResults, onNext, onBack }) {
   const startedRef = useRef(false)
   const [status, setStatus] = useState({}) // pageId -> 'working' | 'queued' | 'error'
 
@@ -52,11 +53,31 @@ export function GenerateStep({ book, results, setResults, onNext }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const allDone = book.pages.every((p) => results[p.id])
+  // A page only counts as done when its printable STL is present, not just the image.
+  const allDone = book.pages.every((p) => results[p.id]?.stlUrl)
+
+  // One concise line for screen readers, announced via the aria-live region below.
+  const total = book.pages.length
+  const activeIdx = book.pages.findIndex((p) =>
+    ['working', 'waking', 'queued'].includes(status[p.id]),
+  )
+  const errored = book.pages.some((p) => status[p.id] === 'error')
+  const liveStatus = allDone
+    ? COPY.generate.allReady
+    : activeIdx >= 0
+      ? `מציירים עמוד ${activeIdx + 1} מתוך ${total}`
+      : errored
+        ? COPY.generate.failed
+        : ''
 
   return (
     <section className="mx-auto max-w-4xl px-6 py-10">
-      <h1 className="text-ink mb-6 text-3xl font-bold">{book.title || COPY.appName}</h1>
+      <StepHeading className="text-ink mb-6 text-3xl font-bold">
+        {book.title || COPY.appName}
+      </StepHeading>
+      <p className="sr-only" role="status" aria-live="polite">
+        {liveStatus}
+      </p>
 
       <div className="grid gap-5 sm:grid-cols-2">
         {book.pages.map((p, i) => {
@@ -92,9 +113,14 @@ export function GenerateStep({ book, results, setResults, onNext }) {
 
               {(res || st === 'error') && (
                 <div className="border-line border-t p-3 text-center">
+                  {res?.imageUrl && !res?.stlUrl && (
+                    <p className="text-muted mb-2 text-sm">{COPY.generate.noStl}</p>
+                  )}
                   <Button size="sm" variant="ghost" onClick={() => generateOne(p)}>
                     <span aria-hidden="true">↻</span>{' '}
-                    {st === 'error' ? COPY.generate.retry : COPY.generate.regenerate}
+                    {st === 'error' || (res && !res.stlUrl)
+                      ? COPY.generate.retry
+                      : COPY.generate.regenerate}
                   </Button>
                 </div>
               )}
@@ -103,7 +129,10 @@ export function GenerateStep({ book, results, setResults, onNext }) {
         })}
       </div>
 
-      <div className="mt-8 flex justify-center">
+      <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <Button size="lg" variant="ghost" onClick={onBack}>
+          <span aria-hidden="true">→</span> {COPY.generate.backToEdit}
+        </Button>
         <Button size="lg" onClick={onNext} disabled={!allDone}>
           {COPY.generate.next} <span aria-hidden="true">←</span>
         </Button>

@@ -1,15 +1,23 @@
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
 import { StlViewer } from './StlViewer'
+import { StepHeading } from './StepHeading'
 import { COPY } from '../lib/copy'
 
 async function downloadStl(url, filename) {
-  const blob = await fetch(url).then((r) => r.blob())
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(a.href)
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const blob = await res.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(a.href)
+  } catch {
+    // Cross-origin/CORS or network failure — open the file directly as a fallback.
+    window.open(url, '_blank', 'noopener')
+  }
 }
 
 /**
@@ -20,7 +28,7 @@ export default function DownloadStep({ book, results, onRestart }) {
 
   return (
     <section className="mx-auto max-w-4xl px-6 py-10">
-      <h1 className="text-ink mb-2 text-3xl font-bold">{COPY.download.title}</h1>
+      <StepHeading className="text-ink mb-2 text-3xl font-bold">{COPY.download.title}</StepHeading>
       <p className="text-muted mb-8 text-lg">{COPY.download.sub}</p>
 
       <div className="space-y-6">
