@@ -83,7 +83,11 @@ def get_pipeline():
     return _pipe
 
 
-@spaces.GPU(duration=300)
+# duration is the GPU reservation. ZeroGPU multiplies it by ~1.5 and caps the
+# result by the CALLER's quota — the public site calls anonymously, whose cap is
+# low, so 300 (→450) was rejected ("requested GPU duration larger than maximum
+# allowed") and SD never ran. 60 (→~90) fits an A10G 25-step SSD-1B run.
+@spaces.GPU(duration=60)
 def run_sd_inference(prompt, negative_prompt, steps, guidance):
     """
     Run Stable Diffusion and return a PIL image.
@@ -355,6 +359,12 @@ with gr.Blocks(title="Hebrew Braille Book Generator — Lithophane (experimental
         work_dir = os.path.join("temp_gen", str(uuid.uuid4()))
         os.makedirs(work_dir, exist_ok=True)
         img_path, _heightmap_path, stl_path = generate_page_assets(page, work_dir)
+        # If SD failed, no PNG is written. Fail cleanly (gr.Error) instead of
+        # letting gr.File crash on Path(missing).stat() -> raw 500 to the client.
+        if not (img_path and os.path.exists(img_path)):
+            raise gr.Error("יצירת הציור נכשלה. נסו שוב בעוד רגע.")
+        if not (stl_path and os.path.exists(stl_path)):
+            raise gr.Error("יצירת קובץ ההדפסה נכשלה. נסו שוב בעוד רגע.")
         return img_path, stl_path
 
     web_btn.click(
