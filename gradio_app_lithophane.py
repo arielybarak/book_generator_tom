@@ -362,4 +362,8 @@ with gr.Blocks(title="Hebrew Braille Book Generator — Lithophane (experimental
 
 
 if __name__ == "__main__":
-    demo.launch()
+    # Whitelist the per-page output dir so Gradio's /file= route will serve the
+    # generated illustration PNGs. The STL goes through gr.File (copied into
+    # Gradio's own temp dir, already served), but the gr.Image PNG is served
+    # in-place from temp_gen/, which Gradio refuses unless explicitly allowed.
+    demo.launch(allowed_paths=[os.path.abspath("temp_gen")])
