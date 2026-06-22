@@ -38,6 +38,7 @@ except ImportError:
 
 import gradio as gr
 import os
+import time
 import cv2
 import torch
 import numpy as np
@@ -387,6 +388,23 @@ with gr.Blocks(title="Hebrew Braille Book Generator — Lithophane (experimental
         outputs=[web_ping_img, web_ping_stl],
         api_name="ping_assets",
     )
+
+    # CPU-only ~22s job: same shape as ping_assets but sleeps first, to reproduce a
+    # *long* request through HF's edge proxy WITHOUT the GPU. Used to test whether a
+    # given @gradio/client version survives the long idle queue/data SSE that the real
+    # SD generation triggers (the JS client hangs on it while the Python client doesn't).
+    web_slow_img = gr.File(visible=False)
+    web_slow_btn = gr.Button(visible=False)
+
+    def slow_ping():
+        time.sleep(22)
+        work_dir = os.path.join("temp_gen", str(uuid.uuid4()))
+        os.makedirs(work_dir, exist_ok=True)
+        png_path = os.path.join(work_dir, "slow.png")
+        cv2.imwrite(png_path, np.full((64, 64, 3), 150, dtype=np.uint8))
+        return png_path
+
+    web_slow_btn.click(slow_ping, outputs=[web_slow_img], api_name="slow_ping")
 
 
 if __name__ == "__main__":
