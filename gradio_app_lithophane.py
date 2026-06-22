@@ -45,6 +45,10 @@ import numpy as np
 import shutil
 import uuid
 import zipfile
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 from diffusers import AutoPipelineForText2Image
 
 from src.language_funcs import (
@@ -407,5 +411,102 @@ with gr.Blocks(title="Hebrew Braille Book Generator — Lithophane (experimental
     web_slow_btn.click(slow_ping, outputs=[web_slow_img], api_name="slow_ping")
 
 
+# ── Plain REST API for the standalone web frontend ────────────────────────────
+# The browser @gradio/client CANNOT drive a ZeroGPU job: the GPU is scheduled only
+# when the page asks huggingface.co for ZeroGPU auth headers via the parent-iframe
+# postMessage handshake (see `is_zerogpu_iframe` in @gradio/client). A third-party
+# site (our Vercel app) isn't in that iframe, so /generate_page submits but never
+# gets a GPU and the JS client hangs forever (the Python client works — different
+# path). Fix: expose the SAME pipeline as a plain REST endpoint. The browser hits
+# it with a normal fetch — no Gradio queue, no SSE, no iframe handshake — and the
+# Space runs the GPU work in-process (it natively owns its ZeroGPU context).
+API_OUTPUT_ROOT = os.path.abspath("api_outputs")
+os.makedirs(API_OUTPUT_ROOT, exist_ok=True)
+
+fastapi_app = FastAPI()
+# Public Space → no credentials needed; the frontend sends credentials:'omit' for
+# *.hf.space, so a wildcard origin is safe and avoids the preflight-credentials trap.
+fastapi_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def _public_base(request: Request) -> str:
+    """Absolute origin for building file URLs the browser can fetch."""
+    host = os.environ.get("SPACE_HOST")  # set by HF, e.g. <slug>.hf.space
+    if host:
+        return f"https://{host}"
+    return str(request.base_url).rstrip("/")  # local/dev fallback
+
+
+@fastapi_app.post("/api/generate")
+async def api_generate(request: Request):
+    body = await request.json()
+    page = {
+        "page_number": 1,
+        "raw_text": body.get("raw_text") or "",
+        "image_description": body.get("image_desc") or "",
+        "object_class": body.get("object_class") or "",
+        "variations": body.get("variations") or {},
+    }
+    uid = str(uuid.uuid4())
+    work_dir = os.path.join(API_OUTPUT_ROOT, uid)
+    os.makedirs(work_dir, exist_ok=True)
+
+    # Heavy GPU+CPU work — run off the event loop (matches how Gradio runs handlers).
+    img_path, _heightmap_path, stl_path = await run_in_threadpool(
+        generate_page_assets, page, work_dir
+    )
+
+    # SD failure leaves NO png (blank-canvas fallback inside generate_page_assets) —
+    # surface it instead of silently returning a blank page.
+    if not (img_path and os.path.exists(img_path)):
+        return JSONResponse(
+            {"error": "image_generation_failed",
+             "detail": "Stable Diffusion did not produce an image (GPU unavailable?)."},
+            status_code=502,
+        )
+    if not (stl_path and os.path.exists(stl_path)):
+        return JSONResponse(
+            {"error": "stl_generation_failed", "detail": "STL meshing failed."},
+            status_code=502,
+        )
+
+    base = _public_base(request)
+    return {
+        "image_url": f"{base}/api/file/{uid}/{os.path.basename(img_path)}",
+        "stl_url":   f"{base}/api/file/{uid}/{os.path.basename(stl_path)}",
+    }
+
+
+@fastapi_app.get("/api/file/{uid}/{fname}")
+def api_file(uid: str, fname: str):
+    if "/" in uid or ".." in uid or "/" in fname or ".." in fname:
+        return JSONResponse({"error": "bad_path"}, status_code=400)
+    path = os.path.join(API_OUTPUT_ROOT, uid, fname)
+    if not os.path.isfile(path):
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    media = ("image/png" if fname.endswith(".png")
+             else "model/stl" if fname.endswith(".stl")
+             else "application/octet-stream")
+    return FileResponse(path, media_type=media, filename=fname)
+
+
+@fastapi_app.get("/api/health")
+def api_health():
+    return {"ok": True}
+
+
+# Mount the Gradio UI under the same FastAPI app; serve both with uvicorn. HF runs
+# this file as __main__, so uvicorn binds the Space port and ZeroGPU still works.
+demo.queue()  # explicit: keep the Gradio queue configured under the mounted app
+app = gr.mount_gradio_app(fastapi_app, demo, path="/")
+
 if __name__ == "__main__":
-    demo.launch()
+    import uvicorn
+
+    port = int(os.environ.get("GRADIO_SERVER_PORT") or os.environ.get("PORT") or 7860)
+    uvicorn.run(app, host="0.0.0.0", port=port)
