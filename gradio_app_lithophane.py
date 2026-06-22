@@ -45,9 +45,6 @@ import numpy as np
 import shutil
 import uuid
 import zipfile
-from fastapi import Request
-from fastapi.responses import JSONResponse, FileResponse
-from starlette.concurrency import run_in_threadpool
 from diffusers import AutoPipelineForText2Image
 
 from src.language_funcs import (
@@ -410,101 +407,13 @@ with gr.Blocks(title="Hebrew Braille Book Generator — Lithophane (experimental
     web_slow_btn.click(slow_ping, outputs=[web_slow_img], api_name="slow_ping")
 
 
-# ── Plain REST API for the standalone web frontend ────────────────────────────
-# The browser @gradio/client CANNOT drive a ZeroGPU job: the GPU is scheduled only
-# when the page asks huggingface.co for ZeroGPU auth headers via the parent-iframe
-# postMessage handshake (see `is_zerogpu_iframe` in @gradio/client). A third-party
-# site (our Vercel app) isn't in that iframe, so /generate_page submits but never
-# gets a GPU and the JS client hangs forever (the Python client works — different
-# path). Fix: expose the SAME pipeline as a plain REST endpoint. The browser hits
-# it with a normal fetch — no Gradio queue, no SSE, no iframe handshake — and the
-# Space runs the GPU work in-process (it natively owns its ZeroGPU context).
-#
-# These routes are attached to Gradio's OWN FastAPI app after launch (see __main__),
-# NOT a separate server: ZeroGPU/HF already own the Gradio launch + port, and a
-# second uvicorn would collide. CORS is handled by Gradio's CustomCORSMiddleware,
-# which reflects the request Origin whenever the host isn't localhost (i.e. on the
-# real *.hf.space host) — so cross-origin calls from Vercel work without extra setup.
-API_OUTPUT_ROOT = os.path.abspath("api_outputs")
-os.makedirs(API_OUTPUT_ROOT, exist_ok=True)
-
-
-def _public_base(request: Request) -> str:
-    """Absolute origin for building file URLs the browser can fetch."""
-    host = os.environ.get("SPACE_HOST")  # set by HF, e.g. <slug>.hf.space
-    if host:
-        return f"https://{host}"
-    return str(request.base_url).rstrip("/")  # local/dev fallback
-
-
-async def api_generate(request: Request):
-    body = await request.json()
-    page = {
-        "page_number": 1,
-        "raw_text": body.get("raw_text") or "",
-        "image_description": body.get("image_desc") or "",
-        "object_class": body.get("object_class") or "",
-        "variations": body.get("variations") or {},
-    }
-    uid = str(uuid.uuid4())
-    work_dir = os.path.join(API_OUTPUT_ROOT, uid)
-    os.makedirs(work_dir, exist_ok=True)
-
-    # Heavy GPU+CPU work — run off the event loop (matches how Gradio runs handlers).
-    img_path, _heightmap_path, stl_path = await run_in_threadpool(
-        generate_page_assets, page, work_dir
-    )
-
-    # SD failure leaves NO png (blank-canvas fallback inside generate_page_assets) —
-    # surface it instead of silently returning a blank page.
-    if not (img_path and os.path.exists(img_path)):
-        return JSONResponse(
-            {"error": "image_generation_failed",
-             "detail": "Stable Diffusion did not produce an image (GPU unavailable?)."},
-            status_code=502,
-        )
-    if not (stl_path and os.path.exists(stl_path)):
-        return JSONResponse(
-            {"error": "stl_generation_failed", "detail": "STL meshing failed."},
-            status_code=502,
-        )
-
-    base = _public_base(request)
-    return {
-        "image_url": f"{base}/api/file/{uid}/{os.path.basename(img_path)}",
-        "stl_url":   f"{base}/api/file/{uid}/{os.path.basename(stl_path)}",
-    }
-
-
-def api_file(uid: str, fname: str):
-    if "/" in uid or ".." in uid or "/" in fname or ".." in fname:
-        return JSONResponse({"error": "bad_path"}, status_code=400)
-    path = os.path.join(API_OUTPUT_ROOT, uid, fname)
-    if not os.path.isfile(path):
-        return JSONResponse({"error": "not_found"}, status_code=404)
-    media = ("image/png" if fname.endswith(".png")
-             else "model/stl" if fname.endswith(".stl")
-             else "application/octet-stream")
-    return FileResponse(path, media_type=media, filename=fname)
-
-
-def api_health():
-    return {"ok": True}
-
-
-def _attach_api_routes(app):
-    """Register the REST routes on Gradio's live FastAPI app (gradio.routes.App,
-    a FastAPI subclass). Gradio's CORS middleware already wraps the app and handles
-    the OPTIONS preflight, so no middleware/OPTIONS handler is needed here."""
-    app.add_api_route("/api/generate", api_generate, methods=["POST"])
-    app.add_api_route("/api/file/{uid}/{fname}", api_file, methods=["GET"])
-    app.add_api_route("/api/health", api_health, methods=["GET"])
-
-
+# The standalone web frontend (Vercel) does NOT use @gradio/client — that client
+# can't drive a ZeroGPU job from outside the huggingface.co iframe (the GPU token
+# handshake never happens, so /generate_page hangs). Instead the frontend calls
+# Gradio's built-in REST API directly with a plain fetch:
+#   POST /gradio_api/call/generate_page  {"data": [...]}  -> {"event_id"}
+#   GET  /gradio_api/call/generate_page/<event_id>        -> SSE 'complete' + data
+# That path goes through the normal queue (same as the Python client), so ZeroGPU
+# schedules it and the file URLs come back ready. Nothing extra is needed here.
 if __name__ == "__main__":
-    demo.queue()
-    # Launch the Gradio server exactly as before (HF/ZeroGPU own the launch + port),
-    # but non-blocking so we can attach the REST routes to the live app, then block.
-    demo.launch(prevent_thread_lock=True)
-    _attach_api_routes(demo.app)
-    demo.block_thread()
+    demo.launch()
