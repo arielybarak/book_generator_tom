@@ -82,7 +82,7 @@ def get_pipeline():
     return _pipe
 
 
-@spaces.GPU(duration=120)
+@spaces.GPU(duration=300)
 def run_sd_inference(prompt, negative_prompt, steps, guidance):
     """
     Run Stable Diffusion and return a PIL image.
@@ -363,8 +363,31 @@ with gr.Blocks(title="Hebrew Braille Book Generator — Lithophane (experimental
         api_name="generate_page",
     )
 
+    # ── CPU-only health check (no GPU) ────────────────────────────────────────────
+    # Mirrors /generate_page's outputs (image + STL as gr.File) but returns tiny
+    # dummy files instantly, with no Stable Diffusion / GPU. Lets us verify the web
+    # plumbing end-to-end — @gradio/client connect, CORS, and gr.File serving —
+    # without burning GPU time or waiting on ZeroGPU. Not used by the production UI flow.
+    web_ping_img = gr.File(visible=False)
+    web_ping_stl = gr.File(visible=False)
+    web_ping_btn = gr.Button(visible=False)
+
+    def ping_assets():
+        work_dir = os.path.join("temp_gen", str(uuid.uuid4()))
+        os.makedirs(work_dir, exist_ok=True)
+        png_path = os.path.join(work_dir, "ping.png")
+        cv2.imwrite(png_path, np.full((64, 64, 3), 150, dtype=np.uint8))
+        stl_path = os.path.join(work_dir, "ping.stl")
+        with open(stl_path, "w") as f:
+            f.write("solid ping\nendsolid ping\n")
+        return png_path, stl_path
+
+    web_ping_btn.click(
+        ping_assets,
+        outputs=[web_ping_img, web_ping_stl],
+        api_name="ping_assets",
+    )
+
 
 if __name__ == "__main__":
-    # temp_gen is whitelisted for serving via GRADIO_ALLOWED_PATHS (set near the
-    # top of this module) so it applies however the app is launched, incl. HF Spaces.
     demo.launch()
