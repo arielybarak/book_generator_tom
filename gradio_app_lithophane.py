@@ -45,9 +45,8 @@ import numpy as np
 import shutil
 import uuid
 import zipfile
-from fastapi import FastAPI, Request
+from fastapi import Request
 from fastapi.responses import JSONResponse, FileResponse
-from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from diffusers import AutoPipelineForText2Image
 
@@ -420,18 +419,14 @@ with gr.Blocks(title="Hebrew Braille Book Generator — Lithophane (experimental
 # path). Fix: expose the SAME pipeline as a plain REST endpoint. The browser hits
 # it with a normal fetch — no Gradio queue, no SSE, no iframe handshake — and the
 # Space runs the GPU work in-process (it natively owns its ZeroGPU context).
+#
+# These routes are attached to Gradio's OWN FastAPI app after launch (see __main__),
+# NOT a separate server: ZeroGPU/HF already own the Gradio launch + port, and a
+# second uvicorn would collide. CORS is handled by Gradio's CustomCORSMiddleware,
+# which reflects the request Origin whenever the host isn't localhost (i.e. on the
+# real *.hf.space host) — so cross-origin calls from Vercel work without extra setup.
 API_OUTPUT_ROOT = os.path.abspath("api_outputs")
 os.makedirs(API_OUTPUT_ROOT, exist_ok=True)
-
-fastapi_app = FastAPI()
-# Public Space → no credentials needed; the frontend sends credentials:'omit' for
-# *.hf.space, so a wildcard origin is safe and avoids the preflight-credentials trap.
-fastapi_app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 def _public_base(request: Request) -> str:
@@ -442,7 +437,6 @@ def _public_base(request: Request) -> str:
     return str(request.base_url).rstrip("/")  # local/dev fallback
 
 
-@fastapi_app.post("/api/generate")
 async def api_generate(request: Request):
     body = await request.json()
     page = {
@@ -482,7 +476,6 @@ async def api_generate(request: Request):
     }
 
 
-@fastapi_app.get("/api/file/{uid}/{fname}")
 def api_file(uid: str, fname: str):
     if "/" in uid or ".." in uid or "/" in fname or ".." in fname:
         return JSONResponse({"error": "bad_path"}, status_code=400)
@@ -495,18 +488,23 @@ def api_file(uid: str, fname: str):
     return FileResponse(path, media_type=media, filename=fname)
 
 
-@fastapi_app.get("/api/health")
 def api_health():
     return {"ok": True}
 
 
-# Mount the Gradio UI under the same FastAPI app; serve both with uvicorn. HF runs
-# this file as __main__, so uvicorn binds the Space port and ZeroGPU still works.
-demo.queue()  # explicit: keep the Gradio queue configured under the mounted app
-app = gr.mount_gradio_app(fastapi_app, demo, path="/")
+def _attach_api_routes(app):
+    """Register the REST routes on Gradio's live FastAPI app (gradio.routes.App,
+    a FastAPI subclass). Gradio's CORS middleware already wraps the app and handles
+    the OPTIONS preflight, so no middleware/OPTIONS handler is needed here."""
+    app.add_api_route("/api/generate", api_generate, methods=["POST"])
+    app.add_api_route("/api/file/{uid}/{fname}", api_file, methods=["GET"])
+    app.add_api_route("/api/health", api_health, methods=["GET"])
+
 
 if __name__ == "__main__":
-    import uvicorn
-
-    port = int(os.environ.get("GRADIO_SERVER_PORT") or os.environ.get("PORT") or 7860)
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    demo.queue()
+    # Launch the Gradio server exactly as before (HF/ZeroGPU own the launch + port),
+    # but non-blocking so we can attach the REST routes to the live app, then block.
+    demo.launch(prevent_thread_lock=True)
+    _attach_api_routes(demo.app)
+    demo.block_thread()
