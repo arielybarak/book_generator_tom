@@ -55,14 +55,6 @@ from src.image_funcs import ensure_font
 from src.lithophane import compose_heightmap, heightmap_to_stl
 from src.config import cfg
 
-# Allow Gradio's /file= route to serve the per-page illustration PNGs, which we
-# write under ./temp_gen/. We set this via the GRADIO_ALLOWED_PATHS env var rather
-# than demo.launch(allowed_paths=...) because HF Spaces launches the app its own
-# way and ignores our launch() kwargs — but the env var is always honored. Without
-# this, gradio 6.x returns 403 "File not allowed" for the image (the STL is fine:
-# gr.File copies it into Gradio's own served temp dir).
-os.environ["GRADIO_ALLOWED_PATHS"] = os.path.abspath("temp_gen")
-
 ensure_font()
 
 # ── Stable Diffusion pipeline (lazy-loaded) ────────────────────────────────────
@@ -338,13 +330,16 @@ with gr.Blocks(title="Hebrew Braille Book Generator — Lithophane (experimental
     # ── Hidden API for the external website (web/) — not shown in the Gradio UI ───
     # A stable endpoint the React frontend calls via @gradio/client. It reuses the
     # existing single-page pipeline and returns the illustration PNG + the STL as
-    # served file URLs. Wiring real gr.Image/gr.File OUTPUTS (rather than a bare
-    # gr.api) guarantees Gradio serves the files as fetchable URLs.
+    # served file URLs. Both are gr.File OUTPUTS: gr.File copies the returned file
+    # into Gradio's own served temp dir (/tmp/gradio), so the /file= route always
+    # serves them. (gr.Image serves the PNG in-place from temp_gen/, which gradio
+    # 6.x's stricter route 403s on HF Spaces — the STL never hit this because it
+    # was already gr.File. The frontend just reads the file URL, so .png is fine.)
     web_text  = gr.Textbox(visible=False)
     web_vars  = gr.JSON(visible=False)          # {char_index: variant_key}
     web_desc  = gr.Textbox(visible=False)
     web_class = gr.Textbox(visible=False)
-    web_out_img = gr.Image(visible=False, type="filepath")
+    web_out_img = gr.File(visible=False)
     web_out_stl = gr.File(visible=False)
     web_btn   = gr.Button(visible=False)
 
