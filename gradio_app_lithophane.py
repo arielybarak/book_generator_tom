@@ -55,6 +55,14 @@ from src.image_funcs import ensure_font
 from src.lithophane import compose_heightmap, heightmap_to_stl
 from src.config import cfg
 
+# Allow Gradio's /file= route to serve the per-page illustration PNGs, which we
+# write under ./temp_gen/. We set this via the GRADIO_ALLOWED_PATHS env var rather
+# than demo.launch(allowed_paths=...) because HF Spaces launches the app its own
+# way and ignores our launch() kwargs — but the env var is always honored. Without
+# this, gradio 6.x returns 403 "File not allowed" for the image (the STL is fine:
+# gr.File copies it into Gradio's own served temp dir).
+os.environ["GRADIO_ALLOWED_PATHS"] = os.path.abspath("temp_gen")
+
 ensure_font()
 
 # ── Stable Diffusion pipeline (lazy-loaded) ────────────────────────────────────
@@ -362,8 +370,6 @@ with gr.Blocks(title="Hebrew Braille Book Generator — Lithophane (experimental
 
 
 if __name__ == "__main__":
-    # Whitelist the per-page output dir so Gradio's /file= route will serve the
-    # generated illustration PNGs. The STL goes through gr.File (copied into
-    # Gradio's own temp dir, already served), but the gr.Image PNG is served
-    # in-place from temp_gen/, which Gradio refuses unless explicitly allowed.
-    demo.launch(allowed_paths=[os.path.abspath("temp_gen")])
+    # temp_gen is whitelisted for serving via GRADIO_ALLOWED_PATHS (set near the
+    # top of this module) so it applies however the app is launched, incl. HF Spaces.
+    demo.launch()
