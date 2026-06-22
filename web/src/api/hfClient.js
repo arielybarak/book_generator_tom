@@ -1,21 +1,24 @@
 /**
- * Thin wrapper around @gradio/client → the HF Space's /generate_page endpoint.
+ * Backend client → the HF Space's plain REST endpoint `/api/generate`.
  *
- * The Space (gradio_app_lithophane.py) exposes a hidden, stable endpoint named
- * "generate_page" that takes (raw_text, variations, image_desc, object_class) and
- * returns [image, stl] as served file URLs. We connect once and reuse the client.
+ * Why not @gradio/client? The browser gradio client cannot drive a ZeroGPU job:
+ * the GPU is scheduled only when the page asks huggingface.co for ZeroGPU auth
+ * headers via the parent-iframe postMessage handshake. A standalone site (this
+ * app) isn't in that iframe, so /generate_page submits but never gets a GPU and
+ * the client hangs forever. The Space therefore also exposes a plain REST route
+ * that runs the same pipeline server-side (it natively owns its ZeroGPU context)
+ * and returns JSON. We hit it with a normal fetch — no queue, no SSE, no iframe.
  */
-import { Client } from '@gradio/client'
-
 const SPACE = import.meta.env.VITE_HF_SPACE || 'MLightning/text2STL-engine-2.0-superMX-bottom'
 
+// HF Space subdomain: owner/name lowercased, every non-alphanumeric run → "-".
+const SLUG = SPACE.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+const ROOT = `https://${SLUG}.hf.space`
+
 // ── HF Spaces CORS workaround ────────────────────────────────────────────────
-// @gradio/client hardcodes `credentials: 'include'` on its requests. HF's edge
-// layer answers the CORS *preflight* for *.hf.space without
-// `Access-Control-Allow-Credentials: true`, so the browser rejects every
-// credentialed cross-origin request and the client can't even connect. A public
-// Space needs no credentials, so strip them for cross-origin Space requests.
-// (EventSource/SSE already defaults to no credentials, so only fetch needs this.)
+// HF's edge layer answers the CORS *preflight* for *.hf.space without
+// `Access-Control-Allow-Credentials: true`, so any credentialed cross-origin
+// request is rejected. A public Space needs no credentials — strip them.
 if (typeof window !== 'undefined' && !window.__hfFetchPatched) {
   const _fetch = window.fetch.bind(window)
   window.fetch = (input, init = {}) => {
@@ -26,72 +29,67 @@ if (typeof window !== 'undefined' && !window.__hfFetchPatched) {
   window.__hfFetchPatched = true
 }
 
-let _clientPromise = null
+const GENERATE_TIMEOUT_MS = 8 * 60 * 1000 // ZeroGPU cold start can take minutes
 
-async function connectWithRetry(onStatus, attempts = 8, delayMs = 5000) {
+/** Poll the Space until it answers (it may be asleep). Emits a 'waking' status. */
+async function wakeUp(onStatus, attempts = 10, delayMs = 5000) {
   for (let i = 0; i < attempts; i++) {
     try {
-      return await Client.connect(SPACE)
-    } catch (err) {
-      const sleeping = err?.message?.includes('config') || err?.message?.includes('503')
-      if (!sleeping || i === attempts - 1) throw err
-      onStatus?.({ type: 'status', stage: 'waking', queue: false, position: 0 })
-      await new Promise((r) => setTimeout(r, delayMs))
+      const res = await fetch(`${ROOT}/api/health`, { method: 'GET' })
+      if (res.ok) {
+        const body = await res.json().catch(() => null)
+        if (body?.ok) return
+      }
+    } catch {
+      // network error / DNS not ready while the Space spins up — keep waiting
     }
+    if (i === attempts - 1) break
+    onStatus?.({ type: 'status', stage: 'waking', queue: true, position: 0 })
+    await new Promise((r) => setTimeout(r, delayMs))
   }
-}
-
-function getClient(onStatus) {
-  if (!_clientPromise) {
-    _clientPromise = connectWithRetry(onStatus).catch((err) => {
-      _clientPromise = null
-      throw err
-    })
-  }
-  return _clientPromise
-}
-
-/** A Gradio file output can be a {url}, a {path}, or a bare string. Normalize to a URL. */
-function fileUrl(item) {
-  if (!item) return null
-  if (typeof item === 'string') return item
-  return item.url || item.path || null
 }
 
 /**
  * Generate one page on the backend.
  *
  * @param {{text:string, variations?:object, imageDesc?:string, objectClass?:string}} page
- * @param {(status:object)=>void} [onStatus]  receives queue/progress status messages
+ * @param {(status:object)=>void} [onStatus]  receives status messages (e.g. 'waking')
  * @returns {Promise<{imageUrl:string|null, stlUrl:string|null}>}
  */
-async function _run({ text, variations, imageDesc, objectClass }, onStatus) {
-  const client = await getClient(onStatus)
-
-  // Positional payload in the endpoint's wired input order.
-  const job = client.submit('/generate_page', [text, variations, imageDesc, objectClass])
-
-  let data = null
-  for await (const msg of job) {
-    if (msg.type === 'status') onStatus?.(msg)
-    else if (msg.type === 'data') data = msg.data
-  }
-
-  if (!Array.isArray(data)) throw new Error('No data returned from /generate_page')
-  const [image, stl] = data
-  return { imageUrl: fileUrl(image), stlUrl: fileUrl(stl) }
-}
-
 export async function generatePage(
   { text, variations = {}, imageDesc = '', objectClass = '' },
   onStatus,
 ) {
-  const args = { text, variations, imageDesc, objectClass }
+  await wakeUp(onStatus)
+  onStatus?.({ type: 'status', stage: 'working' })
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS)
+  let res
   try {
-    return await _run(args, onStatus)
-  } catch {
-    // The cached client may be stale (Space restarted/died). Drop it and reconnect once.
-    _clientPromise = null
-    return await _run(args, onStatus)
+    res = await fetch(`${ROOT}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        raw_text: text,
+        variations,
+        image_desc: imageDesc,
+        object_class: objectClass,
+      }),
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timer)
   }
+
+  let data
+  try {
+    data = await res.json()
+  } catch {
+    throw new Error(`Backend returned non-JSON (status ${res.status})`)
+  }
+  if (!res.ok || data?.error) {
+    throw new Error(data?.detail || data?.error || `Generation failed (${res.status})`)
+  }
+  return { imageUrl: data.image_url || null, stlUrl: data.stl_url || null }
 }
