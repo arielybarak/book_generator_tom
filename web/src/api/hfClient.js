@@ -9,6 +9,23 @@ import { Client } from '@gradio/client'
 
 const SPACE = import.meta.env.VITE_HF_SPACE || 'MLightning/text2STL-engine-2.0-superMX-bottom'
 
+// ── HF Spaces CORS workaround ────────────────────────────────────────────────
+// @gradio/client hardcodes `credentials: 'include'` on its requests. HF's edge
+// layer answers the CORS *preflight* for *.hf.space without
+// `Access-Control-Allow-Credentials: true`, so the browser rejects every
+// credentialed cross-origin request and the client can't even connect. A public
+// Space needs no credentials, so strip them for cross-origin Space requests.
+// (EventSource/SSE already defaults to no credentials, so only fetch needs this.)
+if (typeof window !== 'undefined' && !window.__hfFetchPatched) {
+  const _fetch = window.fetch.bind(window)
+  window.fetch = (input, init = {}) => {
+    const url = typeof input === 'string' ? input : input?.url
+    if (url && url.includes('.hf.space')) init = { ...init, credentials: 'omit' }
+    return _fetch(input, init)
+  }
+  window.__hfFetchPatched = true
+}
+
 let _clientPromise = null
 
 async function connectWithRetry(onStatus, attempts = 8, delayMs = 5000) {
