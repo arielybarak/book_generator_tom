@@ -7,7 +7,7 @@ pillow
 ezdxf
 cadquery
 pyclipper
-gradio
+gradio==6.3.0
 deep-translator
 numpy
 matplotlib
