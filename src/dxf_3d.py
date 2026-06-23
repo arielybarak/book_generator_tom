@@ -349,11 +349,12 @@ def create_base_plate() -> cq.Workplane:
     return base
 
 
-# Rounded ridge tops are produced with a draft TAPER at extrude time (cheap), not an
-# OCCT fillet. Filleting is a per-solid boolean that does not scale to real line-art
-# (a single page is thousands of stroke solids). EDGE_FILLET_ENABLED now toggles the
-# taper; EDGE_FILLET_RATIO is retained only as a CLI default alias.
-STROKE_TAPER_DEG = 15.0
+# Ridge tops are FLAT. We tried a draft taper for rounded, finger-friendly tops, but
+# `extrude(taper=…)` SEGFAULTS inside OCCT on real Hebrew glyph outlines (reproduced on
+# פרח) — a C-level crash that kills the whole worker, no STL, hard to catch. A flat
+# extrude is robust and fast. STROKE_TAPER_DEG = 0 disables the taper path entirely;
+# raise it again only with a crash-isolated (subprocess) extrude.
+STROKE_TAPER_DEG = 0.0
 
 
 def _capped_solid(pts: List[Point], height: float, offset: float = None, round_top: bool = True):
