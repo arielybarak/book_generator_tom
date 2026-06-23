@@ -350,18 +350,27 @@ def create_base_plate() -> cq.Workplane:
 STROKE_TAPER_DEG = 15.0
 
 
-def _capped_solid(profile: cq.Workplane, height: float):
+def _capped_solid(pts: List[Point], height: float, offset: float = None):
     """
-    Extrude `profile` to `height`, returning a cq.Solid. When rounded tops are
+    Extrude polygon `pts` to `height`, returning a cq.Solid. When rounded tops are
     enabled, apply a draft taper so the ridge narrows toward the top (finger-friendly,
     no sharp edge); fall back to a straight extrude if the taper self-intersects.
+
+    A fresh Workplane is built for each attempt: a FAILED taper extrude still consumes
+    the pending wire, so reusing one Workplane would make the fallback raise
+    "No pending wires present" and the feature would be dropped entirely.
     """
+    z = BASE_THICKNESS if offset is None else offset
+
+    def _profile():
+        return cq.Workplane("XY").workplane(offset=z).polyline(pts).close()
+
     if EDGE_FILLET_ENABLED and STROKE_TAPER_DEG > 0:
         try:
-            return profile.extrude(height, taper=STROKE_TAPER_DEG).val()
+            return _profile().extrude(height, taper=STROKE_TAPER_DEG).val()
         except Exception:
             pass
-    return profile.extrude(height).val()
+    return _profile().extrude(height).val()
 
 
 def extrude_text_solids(shapes: List[List[Point]], height: float) -> List:
@@ -375,10 +384,7 @@ def extrude_text_solids(shapes: List[List[Point]], height: float) -> List:
         if polygon_area(pts) < 0:
             pts = list(reversed(pts))
         try:
-            profile = (cq.Workplane("XY")
-                       .workplane(offset=BASE_THICKNESS)
-                       .polyline(pts).close())
-            solids.append(_capped_solid(profile, height))
+            solids.append(_capped_solid(pts, height))
         except Exception as e:
             print(f"    Warning: text shape {i} skipped: {e}")
     return solids
@@ -488,10 +494,7 @@ def _extrude_one_centerline(
             if polygon_area(p2) < 0:
                 p2 = list(reversed(p2))
             try:
-                profile = (cq.Workplane("XY")
-                           .workplane(offset=BASE_THICKNESS)
-                           .polyline(p2).close())
-                solids.append(_capped_solid(profile, stroke_height))
+                solids.append(_capped_solid(p2, stroke_height))
             except Exception as e:
                 print(f"    Warning: image stroke {idx} polygon skipped: {e}")
 
