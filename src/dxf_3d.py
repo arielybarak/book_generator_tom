@@ -53,6 +53,16 @@ BASE_WIDTH          = cfg["plate"]["width_mm"]
 BASE_HEIGHT         = cfg["plate"]["height_mm"]
 BASE_THICKNESS      = cfg["plate"]["thickness_mm"]
 BASE_CORNER_RADIUS  = cfg["plate"]["corner_radius_mm"]
+# Border kept clear of content when laying the page out.
+CONTENT_MARGIN_MM   = cfg["plate"].get("content_margin_mm", 10.0)
+
+# Banded page layout (fractions of the usable height): Hebrew text strip on top,
+# image in the middle, Braille strip on the bottom. Each band is filled independently
+# so the three tactile layers don't overlap.
+_layout = cfg.get("layout", {})
+TEXT_BAND_FRAC      = _layout.get("text_frac", 0.18)
+BRAILLE_BAND_FRAC   = _layout.get("braille_frac", 0.18)
+BAND_GAP_MM         = _layout.get("band_gap_mm", 4.0)
 
 _t = cfg["tactile"]
 
@@ -181,27 +191,72 @@ def translate_circles(circles: List[CircleDef], dx: float, dy: float) -> List[Ci
     return [((cx + dx, cy + dy), r) for (cx, cy), r in circles]
 
 
-def center_all_content_on_base(
+def _xform_paths(paths: List[List[Point]], s: float, cx: float, cy: float, tx: float, ty: float) -> List[List[Point]]:
+    """Scale each point about (cx, cy) by s, then translate so (cx, cy) lands at (tx, ty)."""
+    return [[((x - cx) * s + tx, (y - cy) * s + ty) for x, y in p] for p in paths]
+
+
+def _xform_circles(circles: List[CircleDef], s: float, cx: float, cy: float, tx: float, ty: float) -> List[CircleDef]:
+    return [(((px - cx) * s + tx, (py - cy) * s + ty), r * s) for (px, py), r in circles]
+
+
+def _fit_transform(paths, circles, x0, y0, x1, y1):
+    """
+    Transform (s, cx, cy, tx, ty) that scales the combined bbox of `paths`+`circles`
+    to fit inside the rectangle [x0,y0]–[x1,y1] (uniform, aspect-preserving) and
+    centres it there. Returns None when there is no content.
+    """
+    bx0, by0, bx1, by1 = bbox_of_paths(paths, circles)
+    w, h = bx1 - bx0, by1 - by0
+    if w <= 0 or h <= 0:
+        return None
+    s = min((x1 - x0) / w, (y1 - y0) / h)
+    return (s, (bx0 + bx1) / 2.0, (by0 + by1) / 2.0, (x0 + x1) / 2.0, (y0 + y1) / 2.0)
+
+
+def layout_content_on_base(
     text_shapes: List[List[Point]],
     braille_circles: List[CircleDef],
     image_closed_paths: List[List[Point]],
     image_open_paths: List[List[Point]],
 ) -> Tuple[List[List[Point]], List[CircleDef], List[List[Point]], List[List[Point]]]:
-    all_paths = text_shapes + image_closed_paths + image_open_paths
-    min_x, min_y, max_x, max_y = bbox_of_paths(all_paths, braille_circles)
-    width  = max_x - min_x
-    height = max_y - min_y
-    print(f"  Overall content size: {width:.2f}mm x {height:.2f}mm")
-    cx = (min_x + max_x) / 2.0
-    cy = (min_y + max_y) / 2.0
-    dx = BASE_WIDTH  / 2.0 - cx
-    dy = BASE_HEIGHT / 2.0 - cy
-    return (
-        translate_paths(text_shapes, dx, dy),
-        translate_circles(braille_circles, dx, dy),
-        translate_paths(image_closed_paths, dx, dy),
-        translate_paths(image_open_paths, dx, dy),
-    )
+    """
+    Lay the three tactile layers out in horizontal bands so they don't overlap:
+        ┌─────────────── Hebrew text  (top strip) ───────────────┐
+        │                    line-art image  (middle)            │
+        └─────────────── Braille dots  (bottom strip) ───────────┘
+    Each band is filled independently — the DXF layers arrive at mismatched, oversized
+    coordinate systems (image/text ~1500mm, braille ~px), so each is scaled to fit its
+    own band. Image closed+open paths share ONE transform to stay registered.
+    """
+    m = CONTENT_MARGIN_MM
+    x0, x1 = m, BASE_WIDTH - m
+    usable_h = BASE_HEIGHT - 2 * m
+    text_h = TEXT_BAND_FRAC * usable_h
+    brl_h  = BRAILLE_BAND_FRAC * usable_h
+    g = BAND_GAP_MM
+
+    # y measured from the plate bottom (0) up to BASE_HEIGHT
+    brl_y0, brl_y1 = m, m + brl_h                                   # bottom strip
+    txt_y1, txt_y0 = BASE_HEIGHT - m, BASE_HEIGHT - m - text_h      # top strip
+    img_y0, img_y1 = brl_y1 + g, txt_y0 - g                         # middle
+
+    # Hebrew text → top band
+    t_txt = _fit_transform(text_shapes, [], x0, txt_y0, x1, txt_y1)
+    text_out = _xform_paths(text_shapes, *t_txt) if t_txt else text_shapes
+
+    # Braille → bottom band (radii scale too, though add_braille_domes overrides them)
+    t_brl = _fit_transform([], braille_circles, x0, brl_y0, x1, brl_y1)
+    brl_out = _xform_circles(braille_circles, *t_brl) if t_brl else braille_circles
+
+    # Image (closed + open) → middle band, one shared transform to keep it registered
+    t_img = _fit_transform(image_closed_paths + image_open_paths, [], x0, img_y0, x1, img_y1)
+    img_closed_out = _xform_paths(image_closed_paths, *t_img) if t_img else image_closed_paths
+    img_open_out   = _xform_paths(image_open_paths,   *t_img) if t_img else image_open_paths
+
+    print(f"  Layout → text band {text_h:.0f}mm / image {img_y1 - img_y0:.0f}mm / "
+          f"braille band {brl_h:.0f}mm  (margin {m:.0f}mm)")
+    return text_out, brl_out, img_closed_out, img_open_out
 
 
 def safe_fillet_top(solid: cq.Workplane, radius: float) -> cq.Workplane:
@@ -724,7 +779,7 @@ def create_one_page_stl_from_dxf(
         image_closed, image_open, image_circles = extract_image_centerlines(image_dxf)
         print(f"  Image paths: closed={len(image_closed)} open={len(image_open)} circles={len(image_circles)}")
 
-    text_shapes, braille_circles, image_closed, image_open = center_all_content_on_base(
+    text_shapes, braille_circles, image_closed, image_open = layout_content_on_base(
         text_shapes=text_shapes,
         braille_circles=braille_circles,
         image_closed_paths=image_closed,

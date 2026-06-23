@@ -9,6 +9,14 @@ plate:
   height_mm: 150.0
   thickness_mm: 0.4           # thin backing — tactile features sit on top
   corner_radius_mm: 10.0
+  content_margin_mm: 10.0     # clear border around all content
+
+# Page layout — three non-overlapping horizontal bands (fractions of usable height):
+#   top = Hebrew text, middle = line-art image, bottom = Braille
+layout:
+  text_frac: 0.18
+  braille_frac: 0.18
+  band_gap_mm: 4.0
 
 # ── Tactile ergonomics (tuned for blind child finger exploration) ─────────────
 tactile:
