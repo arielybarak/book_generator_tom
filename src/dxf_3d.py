@@ -343,24 +343,30 @@ def create_base_plate() -> cq.Workplane:
     return base
 
 
-def _fuse_solids(base: cq.Workplane, solids: List) -> cq.Workplane:
+# Rounded ridge tops are produced with a draft TAPER at extrude time (cheap), not an
+# OCCT fillet. Filleting is a per-solid boolean that does not scale to real line-art
+# (a single page is thousands of stroke solids). EDGE_FILLET_ENABLED now toggles the
+# taper; EDGE_FILLET_RATIO is retained only as a CLI default alias.
+STROKE_TAPER_DEG = 15.0
+
+
+def _capped_solid(profile: cq.Workplane, height: float):
     """
-    Fuse many small solids into the base with a SINGLE boolean op.
-
-    Progressive `base.union(solid)` per piece re-triangulates the whole growing
-    model on every call → ~O(N²) and minutes on real line-art. Collecting all the
-    pieces into one compound and fusing once is a single OCCT pass → ~O(N).
-    The result is geometrically identical (union is associative/commutative).
+    Extrude `profile` to `height`, returning a cq.Solid. When rounded tops are
+    enabled, apply a draft taper so the ridge narrows toward the top (finger-friendly,
+    no sharp edge); fall back to a straight extrude if the taper self-intersects.
     """
-    if not solids:
-        return base
-    return base.union(cq.Compound.makeCompound(solids))
+    if EDGE_FILLET_ENABLED and STROKE_TAPER_DEG > 0:
+        try:
+            return profile.extrude(height, taper=STROKE_TAPER_DEG).val()
+        except Exception:
+            pass
+    return profile.extrude(height).val()
 
 
-def extrude_text_solids(base: cq.Workplane, shapes: List[List[Point]], height: float) -> cq.Workplane:
-    """Extrude closed text polygons as solid ridges with filleted top edges."""
+def extrude_text_solids(shapes: List[List[Point]], height: float) -> List:
+    """Extrude closed text polygons as solid ridges with rounded (tapered) tops."""
     print(f"  Text solids: {len(shapes)} closed shapes")
-    fillet_r = height * EDGE_FILLET_RATIO
     solids = []
     for i, pts in enumerate(shapes, 1):
         pts = clean_polyline_points(pts, POINT_CLEAN_TOL)
@@ -369,15 +375,13 @@ def extrude_text_solids(base: cq.Workplane, shapes: List[List[Point]], height: f
         if polygon_area(pts) < 0:
             pts = list(reversed(pts))
         try:
-            solid = (cq.Workplane("XY")
-                     .workplane(offset=BASE_THICKNESS)
-                     .polyline(pts).close()
-                     .extrude(height))
-            solid = safe_fillet_top(solid, fillet_r)
-            solids.append(solid.val())
+            profile = (cq.Workplane("XY")
+                       .workplane(offset=BASE_THICKNESS)
+                       .polyline(pts).close())
+            solids.append(_capped_solid(profile, height))
         except Exception as e:
             print(f"    Warning: text shape {i} skipped: {e}")
-    return _fuse_solids(base, solids)
+    return solids
 
 
 def create_dome(cx: float, cy: float, base_radius: float, height: float) -> cq.Workplane:
@@ -394,7 +398,7 @@ def create_dome(cx: float, cy: float, base_radius: float, height: float) -> cq.W
     return dome.cut(cut_box)
 
 
-def add_braille_domes(base: cq.Workplane, circles: List[CircleDef]) -> cq.Workplane:
+def add_braille_domes(circles: List[CircleDef]) -> List:
     """
     Build Braille domes using fixed Grade 1 dimensions from config
     (braille_dot_radius_mm, braille_dot_height_mm), ignoring the detected radius
@@ -408,7 +412,7 @@ def add_braille_domes(base: cq.Workplane, circles: List[CircleDef]) -> cq.Workpl
             solids.append(create_dome(cx, cy, BRAILLE_FIXED_RADIUS, BRAILLE_FIXED_HEIGHT).val())
         except Exception as e:
             print(f"    Warning: dome {i} skipped: {e}")
-    return _fuse_solids(base, solids)
+    return solids
 
 
 def clipper_clean_and_simplify(poly: List[Point], clean_tol_mm: float) -> List[List[Point]]:
@@ -474,7 +478,6 @@ def _extrude_one_centerline(
     if len(pts) < 2:
         return
 
-    fillet_r    = stroke_height * EDGE_FILLET_RATIO
     stroke_polys = stroke_polygons_from_centerline(pts, half_width, is_closed)
 
     for poly in stroke_polys:
@@ -485,24 +488,21 @@ def _extrude_one_centerline(
             if polygon_area(p2) < 0:
                 p2 = list(reversed(p2))
             try:
-                solid = (cq.Workplane("XY")
-                         .workplane(offset=BASE_THICKNESS)
-                         .polyline(p2).close()
-                         .extrude(stroke_height))
-                solid = safe_fillet_top(solid, fillet_r)
-                solids.append(solid.val())
+                profile = (cq.Workplane("XY")
+                           .workplane(offset=BASE_THICKNESS)
+                           .polyline(p2).close())
+                solids.append(_capped_solid(profile, stroke_height))
             except Exception as e:
                 print(f"    Warning: image stroke {idx} polygon skipped: {e}")
 
 
 def extrude_image_strokes(
-    base: cq.Workplane,
     closed_paths: List[List[Point]],
     open_paths:   List[List[Point]],
     circles:      List[CircleDef],
     outline_height: float = IMAGE_OUTLINE_HEIGHT,
     outline_width:  float = IMAGE_OUTLINE_WIDTH,
-) -> cq.Workplane:
+) -> List:
     """
     Extrude image paths as dome-topped ridges with a two-tier height hierarchy:
       - Closed paths with |area| ≥ OUTLINE_MIN_AREA → main outline (taller, wider)
@@ -545,7 +545,7 @@ def extrude_image_strokes(
         _extrude_one_centerline(solids, pts, True,  IMAGE_DETAIL_WIDTH / 2, IMAGE_DETAIL_HEIGHT, idx)
         idx += 1
 
-    return _fuse_solids(base, solids)
+    return solids
 
 
 # =========================
@@ -594,9 +594,8 @@ def _hatch_lines(polygon: List[Point], spacing: float, angle_deg: float = 0.0) -
 
 
 def add_texture_fills(
-    base: cq.Workplane,
     closed_paths: List[List[Point]],
-) -> cq.Workplane:
+) -> List:
     """
     Fill large / medium closed regions with subtle hatch or crosshatch ridges.
 
@@ -608,7 +607,7 @@ def add_texture_fills(
     pattern reads as a texture rather than a structural element.
     """
     if not TEXTURE_ENABLED:
-        return base
+        return []
 
     half_w = TEXTURE_RIDGE_WIDTH / 2.0
 
@@ -640,7 +639,7 @@ def add_texture_fills(
                         solids.append(solid.val())
                     except Exception:
                         pass
-    return _fuse_solids(base, solids)
+    return solids
 
 
 def create_mounting_holes(base: cq.Workplane) -> cq.Workplane:
@@ -713,25 +712,32 @@ def create_one_page_stl_from_dxf(
     )
 
     print("\nBuilding model...")
-    model = create_base_plate()
+    # Cut mounting holes from the single base solid (cheap — a few cuts).
+    base = create_mounting_holes(create_base_plate())
 
+    # Build every tactile feature as an independent solid; DO NOT boolean-fuse them.
+    # OCCT booleans do not scale to real line-art (one page = thousands of overlapping
+    # stroke solids → minutes-to-hours). Instead emit a multi-volume mesh and let the
+    # slicer union the overlaps at print time — ~190× faster, valid for FDM.
+    parts: List = []
     if text_shapes:
-        model = extrude_text_solids(model, text_shapes, height=text_height)
+        parts += extrude_text_solids(text_shapes, height=text_height)
 
     if braille_circles:
-        model = add_braille_domes(model, braille_circles)
+        parts += add_braille_domes(braille_circles)
 
     if image_dxf and (image_closed or image_open or image_circles):
-        model = extrude_image_strokes(
-            model, image_closed, image_open, image_circles,
+        parts += extrude_image_strokes(
+            image_closed, image_open, image_circles,
             outline_height=stroke_height,
             outline_width=stroke_width,
         )
         if TEXTURE_ENABLED and image_closed:
             print("  Adding texture fills...")
-            model = add_texture_fills(model, image_closed)
+            parts += add_texture_fills(image_closed)
 
-    model = create_mounting_holes(model)
+    model = cq.Compound.makeCompound([base.val()] + parts)
+    print(f"  Assembled {len(parts)} feature solids (no boolean union)")
 
     out = Path(output) if output else None
     if out is None:
