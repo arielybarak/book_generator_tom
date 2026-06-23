@@ -10,8 +10,14 @@ import { COPY } from '../lib/copy'
  * Book state is lifted to App; this is a controlled view.
  */
 export function BookBuilder({ book, setBook, onGenerate }) {
+  const language = book.language || 'hebrew'
+
   function setTitle(title) {
     setBook((b) => ({ ...b, title }))
+  }
+
+  function setLanguage(lang) {
+    setBook((b) => ({ ...b, language: lang }))
   }
 
   function addPage(page) {
@@ -39,10 +45,34 @@ export function BookBuilder({ book, setBook, onGenerate }) {
           placeholder={COPY.builder.bookNamePlaceholder}
           className="border-line bg-surface focus:border-brand w-full rounded-2xl border px-4 py-3 text-lg outline-none"
         />
+
+        <span className="text-ink mt-5 mb-2 block font-semibold">{COPY.builder.languageLabel}</span>
+        <div
+          role="group"
+          aria-label={COPY.builder.languageLabel}
+          className="border-line bg-surface inline-flex gap-1 rounded-2xl border p-1"
+        >
+          {[
+            ['hebrew', COPY.builder.langHe],
+            ['english', COPY.builder.langEn],
+          ].map(([val, label]) => (
+            <button
+              key={val}
+              type="button"
+              onClick={() => setLanguage(val)}
+              aria-pressed={language === val}
+              className={`rounded-xl px-5 py-2 font-semibold transition ${
+                language === val ? 'bg-brand text-white' : 'text-muted hover:text-ink'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </Card>
 
       <Card className="mb-6 p-6">
-        <PageEditor onAdd={addPage} />
+        <PageEditor onAdd={addPage} language={language} />
       </Card>
 
       {/* Pages list */}

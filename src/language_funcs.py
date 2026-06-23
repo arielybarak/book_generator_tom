@@ -195,3 +195,22 @@ def convert_to_braille(text):
             result.append(ch)
             i += 1
     return "".join(result[::-1])
+
+
+# ── English → Braille (Grade 1, uncontracted) ─────────────────────────────────
+ENGLISH_BRAILLE_MAP = {
+    'a': '⠁', 'b': '⠃', 'c': '⠉', 'd': '⠙', 'e': '⠑', 'f': '⠋', 'g': '⠛',
+    'h': '⠓', 'i': '⠊', 'j': '⠚', 'k': '⠅', 'l': '⠇', 'm': '⠍', 'n': '⠝',
+    'o': '⠕', 'p': '⠏', 'q': '⠟', 'r': '⠗', 's': '⠎', 't': '⠞', 'u': '⠥',
+    'v': '⠧', 'w': '⠺', 'x': '⠭', 'y': '⠽', 'z': '⠵', ' ': ' ',
+}
+
+
+def english_to_braille(text):
+    """English → Grade-1 (uncontracted) Unicode Braille, left-to-right. Unknown chars dropped."""
+    return "".join(ENGLISH_BRAILLE_MAP.get(c, '') for c in text.lower())
+
+
+def text_to_braille(text, language='hebrew'):
+    """Language-aware Braille: Hebrew (RTL→reversed) or English (Grade-1, LTR)."""
+    return english_to_braille(text) if language == 'english' else convert_to_braille(text)

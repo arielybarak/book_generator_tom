@@ -9,13 +9,15 @@ import { COPY } from '../lib/copy'
  * with an optional collapsible "pronunciation" panel (nikud chips). Calls
  * onAdd({ text, picture, variations }) and resets.
  */
-export function PageEditor({ onAdd }) {
+export function PageEditor({ onAdd, language = 'hebrew' }) {
   const [text, setText] = useState('')
   const [picture, setPicture] = useState('')
   const [variations, setVariations] = useState({})
   const [showNikud, setShowNikud] = useState(false)
 
-  const choices = useMemo(() => findChoices(text), [text])
+  const isEnglish = language === 'english'
+  // Nikud only applies to Hebrew; English text never triggers it.
+  const choices = useMemo(() => (isEnglish ? [] : findChoices(text)), [text, isEnglish])
 
   function reset() {
     setText('')
@@ -42,7 +44,8 @@ export function PageEditor({ onAdd }) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={2}
-          placeholder={COPY.builder.sentencePlaceholder}
+          dir={isEnglish ? 'ltr' : 'rtl'}
+          placeholder={isEnglish ? COPY.builder.sentencePlaceholderEn : COPY.builder.sentencePlaceholder}
           className="border-line bg-surface focus:border-brand w-full resize-none rounded-2xl border px-4 py-3 text-lg outline-none"
         />
       </div>

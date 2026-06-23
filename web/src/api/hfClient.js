@@ -103,12 +103,12 @@ async function readResultStream(url, signal) {
 /**
  * Generate one page on the backend.
  *
- * @param {{text:string, variations?:object, imageDesc?:string, objectClass?:string}} page
+ * @param {{text:string, variations?:object, imageDesc?:string, objectClass?:string, language?:string}} page
  * @param {(status:object)=>void} [onStatus]  receives status messages (e.g. 'waking')
  * @returns {Promise<{imageUrl:string|null, stlUrl:string|null}>}
  */
 export async function generatePage(
-  { text, variations = {}, imageDesc = '', objectClass = '' },
+  { text, variations = {}, imageDesc = '', objectClass = '', language = 'hebrew' },
   onStatus,
 ) {
   await wakeUp(onStatus)
@@ -128,6 +128,7 @@ export async function generatePage(
         variations,
         image_desc: imageDesc,
         object_class: objectClass,
+        language,
       }),
       signal: controller.signal,
     })

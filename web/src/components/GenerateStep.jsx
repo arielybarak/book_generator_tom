@@ -12,9 +12,20 @@ import { COPY } from '../lib/copy'
 export function GenerateStep({ book, results, setResults, onNext, onBack }) {
   const startedRef = useRef(false)
   const [status, setStatus] = useState({}) // pageId -> 'working' | 'queued' | 'error'
+  const [timers, setTimers] = useState({}) // pageId -> { start, end }
+  const [now, setNow] = useState(Date.now())
+
+  // Tick once a second while any page is still generating, so the elapsed timer counts up.
+  useEffect(() => {
+    const running = Object.values(timers).some((t) => t && !t.end)
+    if (!running) return
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [timers])
 
   async function generateOne(page) {
     setStatus((s) => ({ ...s, [page.id]: 'working' }))
+    setTimers((t) => ({ ...t, [page.id]: { start: Date.now(), end: null } }))
     try {
       const res = await generatePage(
         {
@@ -22,6 +33,7 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
           variations: page.variations,
           imageDesc: page.picture,
           objectClass: page.picture,
+          language: book.language || 'hebrew',
         },
         (msg) => {
           // queue=true means the Space is still waking or other jobs are ahead
@@ -39,6 +51,8 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
     } catch (e) {
       console.error('generate failed', e)
       setStatus((s) => ({ ...s, [page.id]: 'error' }))
+    } finally {
+      setTimers((t) => (t[page.id] ? { ...t, [page.id]: { ...t[page.id], end: Date.now() } } : t))
     }
   }
 
@@ -90,6 +104,14 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
                   {i + 1}
                 </span>
                 <p className="text-ink truncate font-semibold">{p.text}</p>
+                {timers[p.id] && (
+                  <span
+                    className="text-muted ms-auto shrink-0 font-mono text-sm tabular-nums"
+                    title="זמן היצירה"
+                  >
+                    ⏱ {fmtElapsed(timers[p.id], now)}
+                  </span>
+                )}
               </div>
 
               <div className="bg-paper flex aspect-square items-center justify-center p-4">
@@ -139,6 +161,12 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
       </div>
     </section>
   )
+}
+
+function fmtElapsed(timer, now) {
+  if (!timer) return null
+  const s = Math.max(0, Math.floor(((timer.end || now) - timer.start) / 1000))
+  return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s} ש׳`
 }
 
 function Spinner() {

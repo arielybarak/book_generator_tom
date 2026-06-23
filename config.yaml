@@ -7,30 +7,51 @@
 plate:
   width_mm: 150.0
   height_mm: 150.0
-  thickness_mm: 1.5
+  thickness_mm: 0.4           # thin backing — tactile features sit on top
   corner_radius_mm: 10.0
+  content_margin_mm: 10.0     # clear border around all content
 
-# Raised Hebrew text layer (for sighted adults)
-text:
-  extrusion_height_mm: 1.5
+# Page layout — three non-overlapping horizontal bands (fractions of usable height):
+#   top = Hebrew text, middle = line-art image, bottom = Braille
+layout:
+  text_frac: 0.18
+  braille_frac: 0.18
+  band_gap_mm: 4.0
 
-# Raised image layer (line-art strokes)
-image_strokes:
-  width_mm: 1.0       # total stroke width — min ~1mm for FDM printing
-  height_mm: 1.5
+# ── Tactile ergonomics (tuned for blind child finger exploration) ─────────────
+tactile:
 
-# Braille dome layer (for the child)
-braille:
-  dome_height_ratio: 0.5    # dome height = circle_radius × ratio
+  # Height hierarchy — taller = more prominent to touch
+  image_outline_height_mm: 1.2   # main contours (tallest — primary shapes to trace)
+  image_detail_height_mm: 0.7    # inner / secondary lines
+  text_height_mm: 1.0            # raised Hebrew text (sighted adult reads aloud)
+  braille_dot_height_mm: 0.6     # Braille dome height above base
+  braille_dot_radius_mm: 0.75    # standard Grade 1 Braille dot radius
 
-# Optional mounting holes (disabled by default)
-mounting_holes:
-  enabled: false
-  radius_mm: 2.0
-  count: 3
-  margin_right_mm: 7.0
-  margin_top_mm: 20.0
-  spacing_mm: 50.0
+  # Line widths — wider lines are easier to feel
+  image_outline_width_mm: 1.2    # minimum 1.2mm for reliable FDM printing
+  image_detail_width_mm: 0.8
+
+  # Path classification: closed paths with |area| ≥ this (mm²) are "main outlines"
+  outline_min_closed_area_mm2: 100.0
+
+  # Dome cross-section profile
+  # Fillet radius applied to top edges of each stroke solid = height × this ratio.
+  # 0.45 gives a near-semicircle feel; 0.0 disables rounding.
+  edge_fillet_enabled: true
+  stroke_dome_fillet_ratio: 0.45
+
+  # Douglas-Peucker simplification applied to all contour paths before extrusion.
+  # Removes micro-jaggedness from rasterised contours.
+  path_simplification_tolerance_mm: 0.3
+
+  # Texture fill inside large closed regions
+  texture_enabled: true
+  texture_large_region_min_area_mm2: 300.0   # parallel ridges
+  texture_medium_region_min_area_mm2: 80.0   # crosshatch
+  texture_ridge_spacing_mm: 1.5
+  texture_ridge_width_mm: 0.5
+  texture_height_mm: 0.3                     # lower than outline — subtle fill
 
 # Stable Diffusion image generation
 stable_diffusion:
@@ -42,26 +63,28 @@ stable_diffusion:
 dxf:
   canvas_cm: 150
 
-# Lithophane-style STL variant (experimental — used by gradio_app_lithophane.py).
-# Flattens all three layers into one grayscale heightmap, then meshes it directly
-# (no CadQuery). Positive relief: background = flat base, brighter = taller.
-lithophane:
-  resolution_px: 256          # heightmap canvas (square); ~262k triangles, ~13MB STL
-  base_thickness_mm: 1.5      # solid base under the relief
-  relief_height_mm: 2.0       # max Z above base (gray 255 maps here)
-  layout:                     # vertical bands on the plate (fractions, no overlap)
-    text_frac: 0.18           # top band    → Hebrew text
-    braille_frac: 0.18        # bottom band  → Braille
-    # image fills the remaining middle band
-  levels:                     # gray level (0-255) per layer = its relative height
-    image: 150                # ~1.5mm raised line-art
-    text: 150                 # ~1.5mm raised Hebrew text
-    braille: 255              # ~2.0mm, tallest (flat-top bumps in v1)
-
 # Advanced geometry tolerances (change only if you know what you're doing)
 geometry:
-  point_clean_tol_mm: 0.02      # remove near-duplicate polygon points
-  clipper_clean_tol_mm: 0.05    # pyclipper CleanPolygon tolerance
-  pyclipper_scale: 1000.0       # integer scaling factor for pyclipper
-  skeletonization_min_area_px: 15   # noise speck threshold after thinning
-  polygon_simplification_epsilon: 1.0  # approxPolyDP epsilon (pixels)
+  point_clean_tol_mm: 0.02       # remove near-duplicate polygon points
+  clipper_clean_tol_mm: 0.05     # pyclipper CleanPolygon tolerance
+  pyclipper_scale: 1000.0        # integer scaling factor for pyclipper
+  skeletonization_min_area_px: 15
+  polygon_simplification_epsilon: 1.0
+
+# Optional mounting holes (disabled by default)
+mounting_holes:
+  enabled: false
+  radius_mm: 2.0
+  count: 3
+  margin_right_mm: 7.0
+  margin_top_mm: 20.0
+  spacing_mm: 50.0
+
+# ── Legacy keys — kept for reference; dxf_3d.py reads from `tactile` above ───
+braille:
+  dome_height_ratio: 0.5         # fallback if braille_dot_height_mm not set
+text:
+  extrusion_height_mm: 1.0       # superseded by tactile.text_height_mm
+image_strokes:
+  width_mm: 1.2                  # superseded by tactile.image_outline_width_mm
+  height_mm: 1.2                 # superseded by tactile.image_outline_height_mm
