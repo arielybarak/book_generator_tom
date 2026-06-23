@@ -37,7 +37,8 @@ d = json.load(sys.stdin)
 eps = list(d.get('named_endpoints', {}).keys())
 print('Endpoints:', eps)
 want = {'generate_page', 'ping_assets', 'slow_ping'}
-missing = want - set(eps)
+got = {e.lstrip('/') for e in eps}   # Gradio lists names with a leading '/'
+missing = want - got
 print('PASS' if not missing else f'FAIL: missing {missing}')
 "
 ```
