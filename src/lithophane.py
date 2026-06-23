@@ -156,7 +156,11 @@ def heightmap_to_stl(heightmap, out_path, cfg):
     w_mm   = float(plate["width_mm"])
     h_mm   = float(plate["height_mm"])
 
-    hm = heightmap.astype(np.float64)
+    # Heightmap rows go top→bottom (image convention), but we map row→Y which
+    # points UP in the STL. Without flipping, the relief comes out vertically
+    # inverted (Hebrew text upside-down) in every STL viewer/slicer. Flip rows so
+    # heightmap-top → +Y-top: text reads upright, layout stays text-top/braille-bottom.
+    hm = np.flipud(heightmap).astype(np.float64)
     rows, cols = hm.shape
 
     xs = np.linspace(0.0, w_mm, cols)
