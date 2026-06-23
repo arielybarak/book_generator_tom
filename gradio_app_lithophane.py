@@ -52,12 +52,12 @@ from diffusers import AutoPipelineForText2Image
 
 from src.language_funcs import (
     DISPLAY_MAPPING,
-    hebrew_translator, convert_to_braille,
+    hebrew_translator, convert_to_braille, text_to_braille,
     apply_variations, check_ambiguities,
 )
 from src.image_funcs import (
     ensure_font, image_to_dxf_exact,
-    generate_hebrew_text_dxf, generate_braille_dxf_from_text,
+    generate_text_dxf, generate_braille_dxf_from_text,
 )
 from src.dxf_3d import create_one_page_stl_from_dxf
 from src.config import cfg
@@ -143,9 +143,12 @@ def generate_page_assets(page_data, output_dir):
     desc      = page_data['image_description']
     obj_class = page_data['object_class']
     variations = page_data['variations']
+    language  = page_data.get('language', 'hebrew')
 
-    processed_hebrew = apply_variations(raw_text, variations)
-    braille_text     = convert_to_braille(processed_hebrew)
+    # Hebrew: apply nikud, render RTL. English: use the text as-is, render LTR, no nikud.
+    is_english   = language == 'english'
+    display_text = raw_text if is_english else apply_variations(raw_text, variations)
+    braille_text = text_to_braille(display_text, language)
 
     base_name        = f"page_{page_num}"
     img_path         = os.path.join(output_dir, f"{base_name}.png")
@@ -192,7 +195,7 @@ def generate_page_assets(page_data, output_dir):
         print(f"Image generation failed for page {page_num}: {e}")
 
     generate_braille_dxf_from_text(braille_text, dxf_braille_path)
-    generate_hebrew_text_dxf(processed_hebrew, dxf_text_path)
+    generate_text_dxf(display_text, dxf_text_path, rtl=not is_english)
 
     # Build the final 3D-printable STL from the three DXFs (CadQuery, CPU)
     try:
@@ -381,17 +384,19 @@ with gr.Blocks(title="Hebrew Braille Book Generator") as demo:
     web_vars  = gr.JSON(visible=False)          # {char_index: variant_key}
     web_desc  = gr.Textbox(visible=False)
     web_class = gr.Textbox(visible=False)
+    web_lang  = gr.Textbox(visible=False)       # "hebrew" | "english"
     web_out_img = gr.File(visible=False)
     web_out_stl = gr.File(visible=False)
     web_btn   = gr.Button(visible=False)
 
-    def generate_page_web(raw_text, variations, image_desc, object_class):
+    def generate_page_web(raw_text, variations, image_desc, object_class, language="hebrew"):
         page = {
             "page_number": 1,
             "raw_text": raw_text or "",
             "image_description": image_desc or "",
             "object_class": object_class or "",
             "variations": variations or {},
+            "language": (language or "hebrew").lower(),
         }
         work_dir = os.path.join("temp_gen", str(uuid.uuid4()))
         os.makedirs(work_dir, exist_ok=True)
@@ -407,7 +412,7 @@ with gr.Blocks(title="Hebrew Braille Book Generator") as demo:
 
     web_btn.click(
         generate_page_web,
-        inputs=[web_text, web_vars, web_desc, web_class],
+        inputs=[web_text, web_vars, web_desc, web_class, web_lang],
         outputs=[web_out_img, web_out_stl],
         api_name="generate_page",
     )

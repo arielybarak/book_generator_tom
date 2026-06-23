@@ -240,16 +240,17 @@ def _filled_glyphs_to_dxf(image_bw, out_path, canvas_cm=150):
     doc.saveas(out_path)
 
 
-def generate_hebrew_text_dxf(hebrew_text, output_path):
+def generate_text_dxf(text, output_path, rtl=True):
     """
-    Render Hebrew text to a temp PNG via matplotlib, then export SOLID glyph outlines as
-    DXF. Hebrew is RTL so the string is reversed before rendering.
+    Render text to a temp PNG via matplotlib, then export SOLID glyph outlines as DXF.
+    Hebrew is RTL (matplotlib has no bidi, so the string is reversed); English is LTR.
     """
-    temp_img = f"temp_hebrew_{uuid.uuid4()}.png"
+    render_text = text[::-1] if rtl else text
+    temp_img = f"temp_text_{uuid.uuid4()}.png"
     fig = Figure(figsize=(5, 2), facecolor="white")
     ax = fig.add_subplot(111)
     ax.set_facecolor("white")
-    ax.text(0.5, 0.5, hebrew_text[::-1], fontsize=36, color='black',
+    ax.text(0.5, 0.5, render_text, fontsize=36, color='black',
             ha='center', va='center', fontweight='normal', fontname='DejaVu Sans')
     ax.axis("off")
     fig.savefig(temp_img, dpi=300, bbox_inches="tight", pad_inches=0.1,
@@ -262,6 +263,11 @@ def generate_hebrew_text_dxf(hebrew_text, output_path):
     finally:
         if os.path.exists(temp_img):
             os.remove(temp_img)
+
+
+def generate_hebrew_text_dxf(hebrew_text, output_path):
+    """Backwards-compatible Hebrew (RTL) wrapper around generate_text_dxf."""
+    generate_text_dxf(hebrew_text, output_path, rtl=True)
 
 
 # ── Braille geometry (Grade-1, millimetres) ───────────────────────────────────────
