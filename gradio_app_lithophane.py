@@ -1,16 +1,18 @@
 """
-Gradio web app — EXPERIMENTAL lithophane-style STL variant of TOM.
+Gradio web app — the DEPLOYED TOM entry point (set via app_file in README.md).
 
-Same UI and Stable Diffusion stage as gradio_app.py, but the final STL is built
-WITHOUT CadQuery: all three layers (line-art image, Hebrew text, Braille) are
-flattened into one grayscale heightmap, which is meshed directly into an STL
-(see src/lithophane.py — a Python port of the 3dp.rocks/lithophane idea).
+Carries the production web wiring: the hidden /generate_page API, the
+ping_assets / slow_ping CPU health endpoints, gr.Error clean-fail when SD
+produces no image, and gr.File serving (image-403 fix). The final STL is built
+with the CadQuery solid engine (src/dxf_3d.py): each page's three layers
+(line-art image, Hebrew text, Braille) are exported as three DXFs, then assembled
+into one solid STL by create_one_page_stl_from_dxf().
 
-This is a side-by-side experiment for comparison against gradio_app.py; it does
-not replace it. Run manually: `python gradio_app_lithophane.py`.
+(Filename keeps the historical "_lithophane" suffix; the heightmap engine in
+src/lithophane.py is engine 2, no longer used by this app.)
 
 Full pipeline per page:
-  Hebrew text → Stable Diffusion image → combined heightmap PNG → STL
+  Hebrew text → Stable Diffusion image → 3 DXFs → CadQuery solid STL
 
 Key functions:
 - run_sd_inference(): @spaces.GPU-decorated Stable Diffusion call
@@ -45,6 +47,7 @@ import numpy as np
 import shutil
 import uuid
 import zipfile
+from pathlib import Path
 from diffusers import AutoPipelineForText2Image
 
 from src.language_funcs import (
@@ -52,8 +55,11 @@ from src.language_funcs import (
     hebrew_translator, convert_to_braille,
     apply_variations, check_ambiguities,
 )
-from src.image_funcs import ensure_font
-from src.lithophane import compose_heightmap, heightmap_to_stl
+from src.image_funcs import (
+    ensure_font, image_to_dxf_exact,
+    generate_hebrew_text_dxf, generate_braille_dxf_from_text,
+)
+from src.dxf_3d import create_one_page_stl_from_dxf
 from src.config import cfg
 
 ensure_font()
@@ -111,7 +117,7 @@ def run_sd_inference(prompt, negative_prompt, steps, guidance):
 # ── Per-page generation ────────────────────────────────────────────────────────
 
 def generate_page_assets(page_data, output_dir):
-    """Generate the SD image PNG, a combined heightmap PNG, and a lithophane STL."""
+    """Generate the SD image PNG, three DXFs, and the CadQuery solid STL."""
     page_num  = page_data['page_number']
     raw_text  = page_data['raw_text']
     desc      = page_data['image_description']
@@ -121,10 +127,12 @@ def generate_page_assets(page_data, output_dir):
     processed_hebrew = apply_variations(raw_text, variations)
     braille_text     = convert_to_braille(processed_hebrew)
 
-    base_name      = f"page_{page_num}"
-    img_path       = os.path.join(output_dir, f"{base_name}.png")
-    heightmap_path = os.path.join(output_dir, f"{base_name}_heightmap.png")
-    stl_path       = os.path.join(output_dir, f"{base_name}.stl")
+    base_name        = f"page_{page_num}"
+    img_path         = os.path.join(output_dir, f"{base_name}.png")
+    dxf_img_path     = os.path.join(output_dir, f"{base_name}_image.dxf")
+    dxf_braille_path = os.path.join(output_dir, f"{base_name}_braille.dxf")
+    dxf_text_path    = os.path.join(output_dir, f"{base_name}_text.dxf")
+    stl_path         = os.path.join(output_dir, f"{base_name}.stl")
 
     # Prompt building (translation is a CPU/network step — keep it off the GPU)
     eng_desc  = hebrew_translator(desc)
@@ -155,21 +163,29 @@ def generate_page_assets(page_data, output_dir):
         )
         if image is not None:
             image.save(img_path)
+            # Skeletonize → single-pixel-wide lines (avoids double-traced strokes)
             gray = np.array(image.convert("L"))
+            image_to_dxf_exact(gray, dxf_img_path)
         else:
-            print(f"Pipeline unavailable — blank image layer for page {page_num}.")
+            print(f"Pipeline unavailable — skipping image for page {page_num}.")
     except Exception as e:
         print(f"Image generation failed for page {page_num}: {e}")
 
-    # Flatten the three layers into one heightmap, then mesh it directly (no CadQuery)
-    try:
-        heightmap = compose_heightmap(gray, processed_hebrew, braille_text, cfg)
-        cv2.imwrite(heightmap_path, heightmap)
-        heightmap_to_stl(heightmap, stl_path, cfg)
-    except Exception as e:
-        print(f"Lithophane STL generation failed for page {page_num}: {e}")
+    generate_braille_dxf_from_text(braille_text, dxf_braille_path)
+    generate_hebrew_text_dxf(processed_hebrew, dxf_text_path)
 
-    return [img_path, heightmap_path, stl_path]
+    # Build the final 3D-printable STL from the three DXFs (CadQuery, CPU)
+    try:
+        create_one_page_stl_from_dxf(
+            txt_dxf=Path(dxf_text_path),
+            braille_dxf=Path(dxf_braille_path),
+            image_dxf=Path(dxf_img_path),
+            output=Path(stl_path),
+        )
+    except Exception as e:
+        print(f"STL generation failed for page {page_num}: {e}")
+
+    return [img_path, dxf_img_path, dxf_braille_path, dxf_text_path, stl_path]
 
 
 def process_book(book_state_data):
@@ -202,14 +218,15 @@ def process_book(book_state_data):
 
 # ── Gradio UI ──────────────────────────────────────────────────────────────────
 
-with gr.Blocks(title="Hebrew Braille Book Generator — Lithophane (experimental)") as demo:
+with gr.Blocks(title="Hebrew Braille Book Generator") as demo:
 
     book_state = gr.State({"pages": [], "title": ""})
 
-    gr.Markdown("# 📚 Hebrew Braille & Illustration Generator — 🧪 Lithophane variant")
+    gr.Markdown("# 📚 Hebrew Braille & Illustration Generator")
     gr.Markdown(
-        "Experimental: builds the STL from a combined **heightmap** (no CadQuery). "
-        "Outputs a PNG, a heightmap PNG, and an STL per page."
+        "Builds the STL as a true solid (CadQuery) from three DXF layers — "
+        "raised text, Braille domes, image ridges. Outputs a PNG, three DXFs, "
+        "and an STL per page."
     )
 
     with gr.Group() as section_setup:
@@ -358,7 +375,8 @@ with gr.Blocks(title="Hebrew Braille Book Generator — Lithophane (experimental
         }
         work_dir = os.path.join("temp_gen", str(uuid.uuid4()))
         os.makedirs(work_dir, exist_ok=True)
-        img_path, _heightmap_path, stl_path = generate_page_assets(page, work_dir)
+        files = generate_page_assets(page, work_dir)
+        img_path, stl_path = files[0], files[-1]
         # If SD failed, no PNG is written. Fail cleanly (gr.Error) instead of
         # letting gr.File crash on Path(missing).stat() -> raw 500 to the client.
         if not (img_path and os.path.exists(img_path)):
