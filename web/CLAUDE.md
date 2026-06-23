@@ -16,15 +16,23 @@ Env: `VITE_HF_SPACE` = public HF Space id (compute backend). See `.env.example`.
 
 ## Backend API contract (the only backend touchpoint)
 
-`src/api/hfClient.js` → `@gradio/client` → endpoint **`/generate_page`** on the Space:
+`src/api/hfClient.js` → Gradio's **2-step REST API** → endpoint **`/generate_page`** on the Space.
+
+**Do NOT use `@gradio/client`** — it can't drive a ZeroGPU job from a standalone site (GPU-token
+iframe handshake never fires off-iframe → hangs forever). Full contract in `.claude/skills/web-backend-contract`.
+
+Call pattern:
+1. `POST {ROOT}/gradio_api/call/generate_page  {"data": [...]}` → `{ event_id }`
+2. `GET  {ROOT}/gradio_api/call/generate_page/{event_id}` → SSE; read to `event: complete`
 
 - **inputs** (positional): `[raw_text, variations, image_desc, object_class]`
   - `raw_text` — Hebrew sentence
   - `variations` — `{ "<charIndex>": "<key>" }` nikud choices (keys from `lib/nikud.js`)
   - `image_desc` / `object_class` — short picture description (Hebrew or English)
-- **outputs**: `[image, stl]` → served file URLs (`{ url }`)
+- **outputs**: `[image, stl]` — Gradio file objects `{ url: "…/gradio_api/file=/tmp/gradio/…" }`
 
-Defined in `hf_space/gradio_app_lithophane.py` (deployed) and `hf_space/gradio_app.py`.
+Defined in `hf_space/gradio_app_lithophane.py`. Probe endpoints (CPU, zero GPU): `ping_assets`,
+`slow_ping`. Use `/space-probe` to health-check the Space and `/hf-logs` to read tracebacks.
 
 ## Hebrew copy — NO JARGON (glossary)
 

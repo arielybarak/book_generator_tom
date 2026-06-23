@@ -1,8 +1,7 @@
 ---
 description: >-
-  Check TOM's two drift points before a deploy — (1) is the hf_space/ vendored copy
-  in sync with repo-root src/ + config.yaml, and (2) do the nikud keys match between
-  backend (src/language_funcs.py) and frontend (web/src/lib/nikud.js). Report only.
+  Report TOM's two deploy drift points: hf_space/ vs src/+config.yaml sync, and
+  SPECIAL_REPLACEMENTS keys vs web/src/lib/nikud.js. Read-only.
 argument-hint: ""
 ---
 

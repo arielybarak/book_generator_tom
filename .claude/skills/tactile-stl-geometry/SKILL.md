@@ -1,11 +1,9 @@
 ---
 name: tactile-stl-geometry
 description: >-
-  TOM's 3D-printable page geometry — every physical dimension lives in config.yaml
-  (loaded into src/dxf_3d.py via src/config.py), and the three tactile layers (raised
-  text, image ridges, Braille domes) must stay distinct and FDM-printable. USE WHEN
-  changing plate/text/image/Braille dimensions, dome height, stroke width, tolerances,
-  or debugging STL geometry, layer height, or printability.
+  TOM tactile page geometry in config.yaml/src/dxf_3d.py — three layers (raised text,
+  image ridges, Braille domes) must stay distinct and FDM-printable. USE WHEN changing
+  dimensions, dome height, or debugging STL geometry.
 ---
 
 # Tactile STL geometry

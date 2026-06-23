@@ -1,8 +1,7 @@
 ---
 description: >-
-  Generate a TOM tactile page or book — wire Hebrew text + an image description through
-  FlowManager (multi-page, full SD→DXF→STL pipeline) or the dxf_3d.py CLI (build one STL
-  from existing DXFs). Use when creating/testing a page locally.
+  Generate a TOM tactile page via FlowManager (SD→DXF→STL) or dxf_3d.py CLI. USE WHEN
+  creating or testing a page locally.
 argument-hint: "<hebrew text> | <image description>"
 ---
 

@@ -73,13 +73,21 @@ Claude Code reads project-local config from `.claude/`. This repo ships a tuned 
 
 - **Skills** (`.claude/skills/<name>/SKILL.md`, auto-activate on matching work):
   - `hf-space-sync-deploy` — the sync → push-from-`hf_space/` deploy procedure and its traps.
+  - `zerogpu-web-bridge` — ZeroGPU runtime rules: why `@gradio/client` hangs off-iframe, the 2-step REST call, anonymous quota cap, `gr.File` vs. `gr.Image`, CORS. Activate when editing the Space's web-facing endpoints or `hfClient.js`.
+  - `web-backend-contract` — the current `hfClient.js` implementation: CORS shim, wakeUp poll, SSE decoder, file-URL normalization, timeouts. Activate when editing `web/src/api/hfClient.js`.
   - `tactile-stl-geometry` — page geometry lives in `config.yaml` (via `src/config.py`); keep the three tactile layers distinct and FDM-printable.
   - `hebrew-braille-nikud` — Hebrew→Braille + nikud; the `SPECIAL_REPLACEMENTS` keys are a contract mirrored in `DISPLAY_MAPPING` and `web/src/lib/nikud.js`.
   - `image-dxf-generation` — Stable Diffusion line-art → PNG → DXF; needs `opencv-contrib-python`, auto-downloads the Braille font.
-- **Commands** (`/<name>`): `/deploy-hf` (sync → commit → push checklist) · `/check-sync` (vendored-copy + nikud-parity report) · `/new-page` (generate a page/book via `FlowManager` or the `dxf_3d.py` CLI).
-- **Agents** (read-only): `deploy-readiness-reviewer` (pre-deploy GO/NO-GO) · `geometry-auditor` (printability + config-section audit).
+- **Commands** (`/<name>`):
+  - `/deploy-hf` — two-path deploy: app-file-only (commit+push from `hf_space/` directly) or src/config change (sync first, then commit+push).
+  - `/check-sync` — vendored-copy + nikud-parity report (read-only, pre-deploy drift check).
+  - `/hf-logs` — fetch live Space logs (run or build) to see real Python tracebacks. Use when generation fails server-side or the Space boots to RUNTIME_ERROR.
+  - `/space-probe` — zero-GPU health check: wake state, endpoints, CPU round-trip, CORS, file serving. First step for "site won't generate" triage.
+  - `/verify-generate` — confirm the fix worked: CPU-only by default (`ping_assets`), `--gpu` flag for a real generation (owner rule: never burn GPU just to test).
+  - `/new-page` — generate a page/book via `FlowManager` or the `dxf_3d.py` CLI.
+- **`tools/space_browser_test.mjs`** — browser E2E script (Playwright + Chromium) that drives the real Vercel origin so CORS and the fetch shim are exercised. Defaults to `slow_ping` (CPU); `GPU=true` for a full generation. Run from `web/` with the incantation in the file header.
 - **Hook**: `.claude/hooks/sync-guard.py` — PostToolUse **advisory** (never blocks): reminds to run `./sync_to_space.sh` after editing repo-root `src/`/`config.yaml`; warns when a vendored `hf_space/` copy is edited directly. Wired in `.claude/settings.json`.
 - **`.claude/instructions/python.instructions.md`** — Python conventions (ruff, `opencv-contrib-python`, `src.` imports, modern typing).
 
-Skills **must** live under `.claude/skills/` to be discovered — a repo-root `skills/` folder is ignored. `.claude/` is currently untracked — `git add` it if you want the team to share these.
+Skills **must** live under `.claude/skills/` to be discovered. `.claude/` is currently untracked — `git add` it if you want the team to share these.
 

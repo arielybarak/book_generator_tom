@@ -1,11 +1,9 @@
 ---
 name: hebrew-braille-nikud
 description: >-
-  TOM's Hebrew→English translation, Braille conversion, and nikud (vowel-mark)
-  handling in src/language_funcs.py — the SPECIAL_REPLACEMENTS option keys are a
-  contract mirrored in three places. USE WHEN editing translation/Braille/nikud,
-  adding a vowel-mark option, the Gradio disambiguation dropdowns, the /generate_page
-  variations payload, or web/src/lib/nikud.js.
+  TOM Hebrew→Braille+nikud in src/language_funcs.py — SPECIAL_REPLACEMENTS keys
+  mirror DISPLAY_MAPPING and web/src/lib/nikud.js. USE WHEN editing translation,
+  Braille, nikud, or /generate_page variations payload.
 ---
 
 # Hebrew / Braille / nikud

@@ -1,11 +1,9 @@
 ---
 name: hf-space-sync-deploy
 description: >-
-  Deploying TOM's backend to Hugging Face Spaces — the hf_space/ submodule is the
-  canonical, self-contained app; edit repo-root src/ + config.yaml, run
-  ./sync_to_space.sh, then commit + push FROM INSIDE hf_space/. USE WHEN deploying,
-  pushing to the Space, editing the Gradio app, switching app_file, or after changing
-  any src/ module or config.yaml the app uses.
+  TOM hf_space/ deploy: edit src/+config.yaml, sync_to_space.sh, commit+push from
+  hf_space/. USE WHEN deploying to HF Space, editing the Gradio app, or after any
+  src/ or config.yaml change.
 ---
 
 # HF Space sync + deploy

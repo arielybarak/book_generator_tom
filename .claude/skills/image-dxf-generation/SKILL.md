@@ -1,11 +1,9 @@
 ---
 name: image-dxf-generation
 description: >-
-  TOM's image generation + PNG→DXF stage in src/image_funcs.py and
-  src/image_generator.py — Stable Diffusion line-art, skeletonization to single-stroke
-  DXF, and Braille-dot blobs. Requires opencv-contrib-python and auto-downloads a font.
-  USE WHEN editing image generation, PNG→DXF export, thinning/skeletonization, the
-  Braille font, or debugging double-line / missing-glyph / empty-DXF output.
+  TOM PNG→DXF in src/image_funcs.py — SD line-art, skeletonization to DXF, Braille
+  blobs; needs opencv-contrib-python. USE WHEN editing image generation or debugging
+  double-line / missing-glyph / empty-DXF output.
 ---
 
 # Image generation → DXF
