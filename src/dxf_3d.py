@@ -343,10 +343,25 @@ def create_base_plate() -> cq.Workplane:
     return base
 
 
+def _fuse_solids(base: cq.Workplane, solids: List) -> cq.Workplane:
+    """
+    Fuse many small solids into the base with a SINGLE boolean op.
+
+    Progressive `base.union(solid)` per piece re-triangulates the whole growing
+    model on every call → ~O(N²) and minutes on real line-art. Collecting all the
+    pieces into one compound and fusing once is a single OCCT pass → ~O(N).
+    The result is geometrically identical (union is associative/commutative).
+    """
+    if not solids:
+        return base
+    return base.union(cq.Compound.makeCompound(solids))
+
+
 def extrude_text_solids(base: cq.Workplane, shapes: List[List[Point]], height: float) -> cq.Workplane:
     """Extrude closed text polygons as solid ridges with filleted top edges."""
     print(f"  Text solids: {len(shapes)} closed shapes")
     fillet_r = height * EDGE_FILLET_RATIO
+    solids = []
     for i, pts in enumerate(shapes, 1):
         pts = clean_polyline_points(pts, POINT_CLEAN_TOL)
         if len(pts) < 3:
@@ -359,10 +374,10 @@ def extrude_text_solids(base: cq.Workplane, shapes: List[List[Point]], height: f
                      .polyline(pts).close()
                      .extrude(height))
             solid = safe_fillet_top(solid, fillet_r)
-            base = base.union(solid)
+            solids.append(solid.val())
         except Exception as e:
             print(f"    Warning: text shape {i} skipped: {e}")
-    return base
+    return _fuse_solids(base, solids)
 
 
 def create_dome(cx: float, cy: float, base_radius: float, height: float) -> cq.Workplane:
@@ -387,12 +402,13 @@ def add_braille_domes(base: cq.Workplane, circles: List[CircleDef]) -> cq.Workpl
     """
     print(f"  Braille domes: {len(circles)} circles  "
           f"r={BRAILLE_FIXED_RADIUS}mm  h={BRAILLE_FIXED_HEIGHT}mm")
+    solids = []
     for i, ((cx, cy), _) in enumerate(circles, 1):
         try:
-            base = base.union(create_dome(cx, cy, BRAILLE_FIXED_RADIUS, BRAILLE_FIXED_HEIGHT))
+            solids.append(create_dome(cx, cy, BRAILLE_FIXED_RADIUS, BRAILLE_FIXED_HEIGHT).val())
         except Exception as e:
             print(f"    Warning: dome {i} skipped: {e}")
-    return base
+    return _fuse_solids(base, solids)
 
 
 def clipper_clean_and_simplify(poly: List[Point], clean_tol_mm: float) -> List[List[Point]]:
@@ -442,20 +458,21 @@ def stroke_polygons_from_centerline(points: List[Point], half_width: float, clos
 
 
 def _extrude_one_centerline(
-    base: cq.Workplane,
+    solids: List,
     pts: List[Point],
     is_closed: bool,
     half_width: float,
     stroke_height: float,
     idx: int,
-) -> cq.Workplane:
+) -> None:
     """
-    Simplify, stroke, and extrude one centerline path as a dome-topped ridge.
+    Simplify, stroke, and extrude one centerline path as a dome-topped ridge,
+    appending the resulting solids to `solids` (fused in one pass by the caller).
     Fillet radius = stroke_height × EDGE_FILLET_RATIO approximates a semi-ellipse profile.
     """
     pts = rdp_simplify(clean_polyline_points(pts, POINT_CLEAN_TOL), PATH_SIMPLIFY_TOL)
     if len(pts) < 2:
-        return base
+        return
 
     fillet_r    = stroke_height * EDGE_FILLET_RATIO
     stroke_polys = stroke_polygons_from_centerline(pts, half_width, is_closed)
@@ -473,10 +490,9 @@ def _extrude_one_centerline(
                          .polyline(p2).close()
                          .extrude(stroke_height))
                 solid = safe_fillet_top(solid, fillet_r)
-                base  = base.union(solid)
+                solids.append(solid.val())
             except Exception as e:
                 print(f"    Warning: image stroke {idx} polygon skipped: {e}")
-    return base
 
 
 def extrude_image_strokes(
@@ -511,24 +527,25 @@ def extrude_image_strokes(
           f"{n_detail} details "
           f"({IMAGE_DETAIL_HEIGHT:.1f}mm × {IMAGE_DETAIL_WIDTH:.1f}mm)")
 
+    solids: List = []
     idx = 1
     for pts in closed_paths:
         if abs(polygon_area(pts)) >= OUTLINE_MIN_AREA:
             h, w = outline_height, outline_width
         else:
             h, w = IMAGE_DETAIL_HEIGHT, IMAGE_DETAIL_WIDTH
-        base = _extrude_one_centerline(base, pts, True,  w / 2, h, idx)
+        _extrude_one_centerline(solids, pts, True,  w / 2, h, idx)
         idx += 1
 
     for pts in open_paths:
-        base = _extrude_one_centerline(base, pts, False, IMAGE_DETAIL_WIDTH / 2, IMAGE_DETAIL_HEIGHT, idx)
+        _extrude_one_centerline(solids, pts, False, IMAGE_DETAIL_WIDTH / 2, IMAGE_DETAIL_HEIGHT, idx)
         idx += 1
 
     for pts in circle_paths:
-        base = _extrude_one_centerline(base, pts, True,  IMAGE_DETAIL_WIDTH / 2, IMAGE_DETAIL_HEIGHT, idx)
+        _extrude_one_centerline(solids, pts, True,  IMAGE_DETAIL_WIDTH / 2, IMAGE_DETAIL_HEIGHT, idx)
         idx += 1
 
-    return base
+    return _fuse_solids(base, solids)
 
 
 # =========================
@@ -595,6 +612,7 @@ def add_texture_fills(
 
     half_w = TEXTURE_RIDGE_WIDTH / 2.0
 
+    solids: List = []
     for pts in closed_paths:
         area = abs(polygon_area(pts))
         if area < TEXTURE_MEDIUM_AREA:
@@ -619,10 +637,10 @@ def add_texture_fills(
                                  .workplane(offset=BASE_THICKNESS)
                                  .polyline(p2).close()
                                  .extrude(TEXTURE_HEIGHT))
-                        base = base.union(solid)
+                        solids.append(solid.val())
                     except Exception:
                         pass
-    return base
+    return _fuse_solids(base, solids)
 
 
 def create_mounting_holes(base: cq.Workplane) -> cq.Workplane:
