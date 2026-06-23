@@ -4,7 +4,7 @@ import { Stepper } from './components/Stepper'
 import { Landing } from './components/Landing'
 import { BookBuilder } from './components/BookBuilder'
 import { GenerateStep } from './components/GenerateStep'
-import { COPY } from './lib/copy'
+import { useLang } from './lib/i18n'
 
 // three.js is ~700 kB — only load it when the user reaches the download step.
 const DownloadStep = lazy(() => import('./components/DownloadStep'))
@@ -22,7 +22,36 @@ function loadState() {
   }
 }
 
+function LanguageSwitcher() {
+  const { lang, setLang, t } = useLang()
+  return (
+    <div
+      role="group"
+      aria-label={t.common.language}
+      className="border-line bg-surface flex shrink-0 items-center gap-1 rounded-full border p-1 text-sm"
+    >
+      {[
+        ['hebrew', 'עב'],
+        ['english', 'EN'],
+      ].map(([val, label]) => (
+        <button
+          key={val}
+          type="button"
+          onClick={() => setLang(val)}
+          aria-pressed={lang === val}
+          className={`rounded-full px-3 py-1 font-bold transition ${
+            lang === val ? 'bg-brand text-white' : 'text-muted hover:text-ink'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function Header({ step, onStepClick }) {
+  const { t } = useLang()
   return (
     <header className="border-line bg-paper/80 sticky top-0 z-10 border-b backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-4">
@@ -30,9 +59,12 @@ function Header({ step, onStepClick }) {
           <span className="bg-brand flex h-9 w-9 items-center justify-center rounded-2xl text-lg font-bold text-white">
             ✦
           </span>
-          <span className="text-ink text-xl font-bold">{COPY.appName}</span>
+          <span className="text-ink text-xl font-bold">{t.appName}</span>
         </div>
-        <Stepper current={step} onStepClick={onStepClick} />
+        <div className="flex items-center gap-3">
+          <Stepper current={step} onStepClick={onStepClick} />
+          <LanguageSwitcher />
+        </div>
       </div>
     </header>
   )
@@ -72,7 +104,7 @@ export default function App() {
     <MotionConfig reducedMotion="user">
       <div className="flex min-h-dvh flex-col">
         <Header step={step} onStepClick={goTo} />
-        <main className="flex-1" aria-label="תוכן ראשי">
+        <main className="flex-1">
           {step === 0 && <Landing onStart={() => setStep(1)} />}
           {step === 1 && (
             <BookBuilder book={book} setBook={setBook} onGenerate={() => setStep(2)} />

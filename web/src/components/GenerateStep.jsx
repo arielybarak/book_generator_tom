@@ -3,17 +3,18 @@ import { Button } from './ui/Button'
 import { Card } from './ui/Card'
 import { StepHeading } from './StepHeading'
 import { generatePage } from '../api/hfClient'
-import { COPY } from '../lib/copy'
+import { useLang } from '../lib/i18n'
 
 /**
  * Step 3 — generate each page on the backend (sequentially, to be gentle on the
  * shared GPU), show the illustration as it lands, and allow per-page regenerate.
  */
 export function GenerateStep({ book, results, setResults, onNext, onBack }) {
+  const { t, lang } = useLang()
   const startedRef = useRef(false)
   const [status, setStatus] = useState({}) // pageId -> 'working' | 'queued' | 'error'
   const [timers, setTimers] = useState({}) // pageId -> { start, end }
-  const [now, setNow] = useState(Date.now())
+  const [now, setNow] = useState(() => Date.now())
 
   // Tick once a second while any page is still generating, so the elapsed timer counts up.
   useEffect(() => {
@@ -33,7 +34,7 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
           variations: page.variations,
           imageDesc: page.picture,
           objectClass: page.picture,
-          language: book.language || 'hebrew',
+          language: lang,
         },
         (msg) => {
           // queue=true means the Space is still waking or other jobs are ahead
@@ -77,17 +78,17 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
   )
   const errored = book.pages.some((p) => status[p.id] === 'error')
   const liveStatus = allDone
-    ? COPY.generate.allReady
+    ? t.generate.allReady
     : activeIdx >= 0
-      ? `מציירים עמוד ${activeIdx + 1} מתוך ${total}`
+      ? `${t.generate.page} ${activeIdx + 1} ${t.common.of} ${total}`
       : errored
-        ? COPY.generate.failed
+        ? t.generate.failed
         : ''
 
   return (
     <section className="mx-auto max-w-4xl px-6 py-10">
       <StepHeading className="text-ink mb-6 text-3xl font-bold">
-        {book.title || COPY.appName}
+        {book.title || t.appName}
       </StepHeading>
       <p className="sr-only" role="status" aria-live="polite">
         {liveStatus}
@@ -107,9 +108,9 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
                 {timers[p.id] && (
                   <span
                     className="text-muted ms-auto shrink-0 font-mono text-sm tabular-nums"
-                    title="זמן היצירה"
+                    title={t.generate.elapsed}
                   >
-                    ⏱ {fmtElapsed(timers[p.id], now)}
+                    ⏱ {fmtElapsed(timers[p.id], now, t.common.sec)}
                   </span>
                 )}
               </div>
@@ -118,16 +119,16 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
                 {res?.imageUrl ? (
                   <img
                     src={res.imageUrl}
-                    alt={`ציור לעמוד ${i + 1}: ${p.picture || p.text}`}
+                    alt={`${t.generate.page} ${i + 1}: ${p.picture || p.text}`}
                     className="max-h-full max-w-full object-contain"
                   />
                 ) : st === 'error' ? (
-                  <p className="text-muted px-4 text-center">{COPY.generate.failed}</p>
+                  <p className="text-muted px-4 text-center">{t.generate.failed}</p>
                 ) : (
                   <div className="text-center">
                     <Spinner />
                     <p className="text-muted mt-3 text-sm">
-                      {st === 'waking' ? COPY.generate.waking : st === 'queued' ? COPY.generate.waking : COPY.generate.working}
+                      {st === 'waking' ? t.generate.waking : st === 'queued' ? t.generate.waking : t.generate.working}
                     </p>
                   </div>
                 )}
@@ -136,13 +137,13 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
               {(res || st === 'error') && (
                 <div className="border-line border-t p-3 text-center">
                   {res?.imageUrl && !res?.stlUrl && (
-                    <p className="text-muted mb-2 text-sm">{COPY.generate.noStl}</p>
+                    <p className="text-muted mb-2 text-sm">{t.generate.noStl}</p>
                   )}
                   <Button size="sm" variant="ghost" onClick={() => generateOne(p)}>
                     <span aria-hidden="true">↻</span>{' '}
                     {st === 'error' || (res && !res.stlUrl)
-                      ? COPY.generate.retry
-                      : COPY.generate.regenerate}
+                      ? t.generate.retry
+                      : t.generate.regenerate}
                   </Button>
                 </div>
               )}
@@ -153,20 +154,20 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
 
       <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
         <Button size="lg" variant="ghost" onClick={onBack}>
-          <span aria-hidden="true">→</span> {COPY.generate.backToEdit}
+          <span aria-hidden="true">{t.common.arrowPrev}</span> {t.generate.backToEdit}
         </Button>
         <Button size="lg" onClick={onNext} disabled={!allDone}>
-          {COPY.generate.next} <span aria-hidden="true">←</span>
+          {t.generate.next} <span aria-hidden="true">{t.common.arrowNext}</span>
         </Button>
       </div>
     </section>
   )
 }
 
-function fmtElapsed(timer, now) {
+function fmtElapsed(timer, now, sec = 's') {
   if (!timer) return null
   const s = Math.max(0, Math.floor(((timer.end || now) - timer.start) / 1000))
-  return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s} ש׳`
+  return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s} ${sec}`
 }
 
 function Spinner() {

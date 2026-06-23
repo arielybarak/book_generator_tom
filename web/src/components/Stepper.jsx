@@ -1,4 +1,4 @@
-import { COPY } from '../lib/copy'
+import { useLang } from '../lib/i18n'
 
 /**
  * Compact 4-step progress indicator. RTL-aware (flows right→left naturally).
@@ -6,9 +6,10 @@ import { COPY } from '../lib/copy'
  * and edit; the current and future steps stay inert.
  */
 export function Stepper({ current, onStepClick }) {
+  const { t } = useLang()
   return (
-    <nav aria-label="התקדמות" className="flex items-center justify-center gap-1 sm:gap-3">
-      {COPY.steps.map((label, i) => {
+    <nav aria-label={t.appName} className="flex items-center justify-center gap-1 sm:gap-3">
+      {t.steps.map((label, i) => {
         const done = i < current
         const active = i === current
         const clickable = done && typeof onStepClick === 'function'
@@ -17,7 +18,7 @@ export function Stepper({ current, onStepClick }) {
           <div key={label} className="flex items-center gap-1 sm:gap-2">
             <Inner
               {...(clickable
-                ? { type: 'button', onClick: () => onStepClick(i), 'aria-label': `חזרה ל${label}` }
+                ? { type: 'button', onClick: () => onStepClick(i), 'aria-label': `${t.common.back}: ${label}` }
                 : {})}
               className={`flex items-center gap-1 sm:gap-2 ${clickable ? 'cursor-pointer rounded-full' : ''}`}
             >
@@ -41,7 +42,7 @@ export function Stepper({ current, onStepClick }) {
                 {label}
               </span>
             </Inner>
-            {i < COPY.steps.length - 1 && (
+            {i < t.steps.length - 1 && (
               <span className="bg-line hidden h-px w-4 sm:inline-block sm:w-8" />
             )}
           </div>

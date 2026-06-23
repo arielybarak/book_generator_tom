@@ -3,21 +3,18 @@ import { Button } from './ui/Button'
 import { Card } from './ui/Card'
 import { PageEditor } from './PageEditor'
 import { StepHeading } from './StepHeading'
-import { COPY } from '../lib/copy'
+import { useLang } from '../lib/i18n'
 
 /**
  * Step 2 — build the book: a title, an add-page form, and the list of pages.
- * Book state is lifted to App; this is a controlled view.
+ * Book state is lifted to App; this is a controlled view. The page language
+ * follows the global UI language (header switcher), so there's no per-book toggle.
  */
 export function BookBuilder({ book, setBook, onGenerate }) {
-  const language = book.language || 'hebrew'
+  const { t } = useLang()
 
   function setTitle(title) {
     setBook((b) => ({ ...b, title }))
-  }
-
-  function setLanguage(lang) {
-    setBook((b) => ({ ...b, language: lang }))
   }
 
   function addPage(page) {
@@ -32,57 +29,33 @@ export function BookBuilder({ book, setBook, onGenerate }) {
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-10">
-      <StepHeading className="text-ink mb-6 text-3xl font-bold">{COPY.builder.title}</StepHeading>
+      <StepHeading className="text-ink mb-6 text-3xl font-bold">{t.builder.title}</StepHeading>
 
       <Card className="mb-6 p-6">
         <label htmlFor="book-name" className="text-ink mb-1 block font-semibold">
-          {COPY.builder.bookNameLabel}
+          {t.builder.bookNameLabel}
         </label>
         <input
           id="book-name"
           value={book.title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder={COPY.builder.bookNamePlaceholder}
+          placeholder={t.builder.bookNamePlaceholder}
           className="border-line bg-surface focus:border-brand w-full rounded-2xl border px-4 py-3 text-lg outline-none"
         />
-
-        <span className="text-ink mt-5 mb-2 block font-semibold">{COPY.builder.languageLabel}</span>
-        <div
-          role="group"
-          aria-label={COPY.builder.languageLabel}
-          className="border-line bg-surface inline-flex gap-1 rounded-2xl border p-1"
-        >
-          {[
-            ['hebrew', COPY.builder.langHe],
-            ['english', COPY.builder.langEn],
-          ].map(([val, label]) => (
-            <button
-              key={val}
-              type="button"
-              onClick={() => setLanguage(val)}
-              aria-pressed={language === val}
-              className={`rounded-xl px-5 py-2 font-semibold transition ${
-                language === val ? 'bg-brand text-white' : 'text-muted hover:text-ink'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
       </Card>
 
       <Card className="mb-6 p-6">
-        <PageEditor onAdd={addPage} language={language} />
+        <PageEditor onAdd={addPage} />
       </Card>
 
       {/* Pages list */}
       <h2 className="text-ink mb-3 text-xl font-bold">
-        {COPY.builder.pagesTitle}{' '}
+        {t.builder.pagesTitle}{' '}
         <span className="text-muted text-base font-normal">({book.pages.length})</span>
       </h2>
       {book.pages.length === 0 ? (
         <p className="border-line bg-surface/60 text-muted rounded-2xl border border-dashed p-6 text-center">
-          {COPY.builder.empty}
+          {t.builder.empty}
         </p>
       ) : (
         <ul className="space-y-3">
@@ -106,10 +79,10 @@ export function BookBuilder({ book, setBook, onGenerate }) {
                   <button
                     type="button"
                     onClick={() => removePage(p.id)}
-                    aria-label={`${COPY.common.remove} עמוד ${i + 1}`}
+                    aria-label={`${t.common.remove} עמוד ${i + 1}`}
                     className="text-muted hover:bg-brand-soft hover:text-brand-dark rounded-full px-3 py-1 text-sm"
                   >
-                    {COPY.common.remove}
+                    {t.common.remove}
                   </button>
                 </Card>
               </motion.li>
@@ -120,7 +93,7 @@ export function BookBuilder({ book, setBook, onGenerate }) {
 
       <div className="mt-8 flex justify-center">
         <Button size="lg" onClick={onGenerate} disabled={!canGenerate}>
-          {COPY.builder.generate} <span aria-hidden="true">←</span>
+          {t.builder.generate} <span aria-hidden="true">{t.common.arrowNext}</span>
         </Button>
       </div>
     </section>

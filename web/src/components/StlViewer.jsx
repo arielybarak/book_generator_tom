@@ -2,12 +2,14 @@ import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { useLang } from '../lib/i18n'
 
 /**
  * Rotatable 3D preview of a page STL. Loads the mesh from `url`, lays it flat,
  * fits the camera, and lets the user orbit/zoom. Cleans up WebGL on unmount.
  */
 export function StlViewer({ url, className = '' }) {
+  const { t } = useLang()
   const mountRef = useRef(null)
 
   useEffect(() => {
@@ -98,7 +100,7 @@ export function StlViewer({ url, className = '' }) {
     <div
       ref={mountRef}
       role="img"
-      aria-label="תצוגה תלת־ממדית של העמוד — אפשר לסובב"
+      aria-label={t.common.viewer}
       className={`rounded-card border-line bg-paper overflow-hidden border ${className}`}
     />
   )

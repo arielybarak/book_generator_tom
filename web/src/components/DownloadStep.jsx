@@ -2,7 +2,7 @@ import { Button } from './ui/Button'
 import { Card } from './ui/Card'
 import { StlViewer } from './StlViewer'
 import { StepHeading } from './StepHeading'
-import { COPY } from '../lib/copy'
+import { useLang } from '../lib/i18n'
 
 async function downloadStl(url, filename) {
   try {
@@ -24,12 +24,13 @@ async function downloadStl(url, filename) {
  * Step 4 — preview each finished page in 3D and download its printable STL.
  */
 export default function DownloadStep({ book, results, onRestart }) {
+  const { t } = useLang()
   const safeTitle = (book.title || 'page').replace(/\s+/g, '_')
 
   return (
     <section className="mx-auto max-w-4xl px-6 py-10">
-      <StepHeading className="text-ink mb-2 text-3xl font-bold">{COPY.download.title}</StepHeading>
-      <p className="text-muted mb-8 text-lg">{COPY.download.sub}</p>
+      <StepHeading className="text-ink mb-2 text-3xl font-bold">{t.download.title}</StepHeading>
+      <p className="text-muted mb-8 text-lg">{t.download.sub}</p>
 
       <div className="space-y-6">
         {book.pages.map((p, i) => {
@@ -38,16 +39,16 @@ export default function DownloadStep({ book, results, onRestart }) {
           return (
             <Card key={p.id} className="grid gap-4 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
               <StlViewer url={res.stlUrl} className="h-64 w-full" />
-              <div className="text-center sm:px-6 sm:text-right">
+              <div className="text-center sm:px-6 sm:text-start">
                 <p className="text-muted mb-1 text-sm">
-                  עמוד {i + 1} {COPY.common.of} {book.pages.length}
+                  {t.generate.page} {i + 1} {t.common.of} {book.pages.length}
                 </p>
                 <p className="text-ink mb-4 font-semibold">{p.text}</p>
                 <button
                   onClick={() => downloadStl(res.stlUrl, `${safeTitle}_${i + 1}.stl`)}
                   className="rounded-btn bg-brand shadow-soft hover:bg-brand-dark inline-flex items-center justify-center gap-2 px-6 py-3 font-semibold text-white transition"
                 >
-                  <span aria-hidden="true">⬇</span> {COPY.download.download}
+                  <span aria-hidden="true">⬇</span> {t.download.download}
                 </button>
               </div>
             </Card>
@@ -57,13 +58,13 @@ export default function DownloadStep({ book, results, onRestart }) {
 
       {/* Print guidance */}
       <Card className="bg-accent-soft mt-8 p-6">
-        <h2 className="text-ink mb-2 text-lg font-bold">{COPY.download.printTitle}</h2>
-        <p className="text-muted">{COPY.download.printBody}</p>
+        <h2 className="text-ink mb-2 text-lg font-bold">{t.download.printTitle}</h2>
+        <p className="text-muted">{t.download.printBody}</p>
       </Card>
 
       <div className="mt-8 flex justify-center">
         <Button size="lg" variant="ghost" onClick={onRestart}>
-          <span aria-hidden="true">＋</span> {COPY.download.startOver}
+          <span aria-hidden="true">＋</span> {t.download.startOver}
         </Button>
       </div>
     </section>

@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { Button } from './ui/Button'
 import { TactilePageMock } from './TactilePageMock'
-import { COPY } from '../lib/copy'
+import { useLang } from '../lib/i18n'
 
 const fade = {
   hidden: { opacity: 0, y: 16 },
@@ -15,35 +15,36 @@ const GALLERY = [
 ]
 
 export function Landing({ onStart }) {
+  const { t } = useLang()
   return (
     <>
       {/* Hero */}
       <section className="mx-auto grid max-w-5xl items-center gap-10 px-6 py-10 md:grid-cols-2 md:gap-12 md:py-16">
         {/* Copy + CTA */}
-        <motion.div initial="hidden" animate="show" className="text-center md:text-right">
+        <motion.div initial="hidden" animate="show" className="text-center md:text-start">
           <motion.p
             custom={0}
             variants={fade}
             className="bg-accent-soft text-accent mb-3 inline-block rounded-full px-4 py-1 text-sm font-semibold"
           >
-            {COPY.tagline}
+            {t.tagline}
           </motion.p>
           <motion.h1
             custom={1}
             variants={fade}
             className="text-ink text-4xl leading-tight font-bold md:text-5xl"
           >
-            {COPY.landing.headline}
+            {t.landing.headline}
           </motion.h1>
           <motion.p custom={2} variants={fade} className="text-muted mt-5 text-lg">
-            {COPY.landing.sub}
+            {t.landing.sub}
           </motion.p>
           <motion.div custom={3} variants={fade} className="mt-8">
             <Button size="lg" onClick={onStart} className="text-xl">
-              {COPY.landing.cta}
-              <span aria-hidden="true">←</span>
+              {t.landing.cta}
+              <span aria-hidden="true">{t.common.arrowNext}</span>
             </Button>
-            <p className="text-muted mt-4 text-sm">{COPY.landing.note}</p>
+            <p className="text-muted mt-4 text-sm">{t.landing.note}</p>
           </motion.div>
         </motion.div>
 
@@ -60,7 +61,7 @@ export function Landing({ onStart }) {
 
       {/* Example gallery */}
       <section
-        aria-label="דוגמאות לעמודים"
+        aria-label={t.landing.galleryTitle}
         className="border-line bg-surface/50 border-t px-6 py-12"
       >
         <div className="mx-auto max-w-5xl">
@@ -71,7 +72,7 @@ export function Landing({ onStart }) {
             transition={{ duration: 0.5 }}
             className="text-ink mb-8 text-center text-2xl font-bold"
           >
-            {COPY.landing.galleryTitle}
+            {t.landing.galleryTitle}
           </motion.h2>
           <div className="grid gap-6 sm:grid-cols-3">
             {GALLERY.map(({ word, label }, i) => (
@@ -96,8 +97,8 @@ export function Landing({ onStart }) {
             className="mt-10 text-center"
           >
             <Button size="lg" onClick={onStart}>
-              {COPY.landing.cta}
-              <span aria-hidden="true">←</span>
+              {t.landing.cta}
+              <span aria-hidden="true">{t.common.arrowNext}</span>
             </Button>
           </motion.div>
         </div>

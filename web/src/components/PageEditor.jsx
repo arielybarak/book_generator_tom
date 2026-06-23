@@ -2,20 +2,21 @@ import { useMemo, useState } from 'react'
 import { Button } from './ui/Button'
 import { NikudChooser } from './NikudChooser'
 import { findChoices } from '../lib/nikud'
-import { COPY } from '../lib/copy'
+import { useLang } from '../lib/i18n'
 
 /**
- * Form for composing one page: a Hebrew sentence + a short picture description,
- * with an optional collapsible "pronunciation" panel (nikud chips). Calls
+ * Form for composing one page: a sentence + a short picture description, with an
+ * optional collapsible "pronunciation" panel (nikud chips, Hebrew only). Calls
  * onAdd({ text, picture, variations }) and resets.
  */
-export function PageEditor({ onAdd, language = 'hebrew' }) {
+export function PageEditor({ onAdd }) {
+  const { t, lang } = useLang()
   const [text, setText] = useState('')
   const [picture, setPicture] = useState('')
   const [variations, setVariations] = useState({})
   const [showNikud, setShowNikud] = useState(false)
 
-  const isEnglish = language === 'english'
+  const isEnglish = lang === 'english'
   // Nikud only applies to Hebrew; English text never triggers it.
   const choices = useMemo(() => (isEnglish ? [] : findChoices(text)), [text, isEnglish])
 
@@ -37,15 +38,14 @@ export function PageEditor({ onAdd, language = 'hebrew' }) {
     <form onSubmit={submit} className="space-y-4">
       <div>
         <label htmlFor="page-text" className="text-ink mb-1 block font-semibold">
-          {COPY.builder.sentenceLabel}
+          {t.builder.sentenceLabel}
         </label>
         <textarea
           id="page-text"
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={2}
-          dir={isEnglish ? 'ltr' : 'rtl'}
-          placeholder={isEnglish ? COPY.builder.sentencePlaceholderEn : COPY.builder.sentencePlaceholder}
+          placeholder={t.builder.sentencePlaceholder}
           className="border-line bg-surface focus:border-brand w-full resize-none rounded-2xl border px-4 py-3 text-lg outline-none"
         />
       </div>
@@ -59,7 +59,7 @@ export function PageEditor({ onAdd, language = 'hebrew' }) {
             className="text-accent text-sm font-semibold hover:underline"
           >
             {showNikud ? '▾ ' : '▸ '}
-            {COPY.builder.soundQuestion} ({choices.length})
+            {t.builder.soundQuestion} ({choices.length})
           </button>
           {showNikud && (
             <div className="mt-3 space-y-2">
@@ -78,19 +78,19 @@ export function PageEditor({ onAdd, language = 'hebrew' }) {
 
       <div>
         <label htmlFor="page-picture" className="text-ink mb-1 block font-semibold">
-          {COPY.builder.pictureLabel}
+          {t.builder.pictureLabel}
         </label>
         <input
           id="page-picture"
           value={picture}
           onChange={(e) => setPicture(e.target.value)}
-          placeholder={COPY.builder.picturePlaceholder}
+          placeholder={t.builder.picturePlaceholder}
           className="border-line bg-surface focus:border-brand w-full rounded-2xl border px-4 py-3 text-lg outline-none"
         />
       </div>
 
       <Button type="submit" variant="soft" disabled={!text.trim()}>
-        <span aria-hidden="true">＋</span> {COPY.builder.addPage}
+        <span aria-hidden="true">＋</span> {t.builder.addPage}
       </Button>
     </form>
   )
