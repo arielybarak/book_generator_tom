@@ -83,11 +83,11 @@ def get_pipeline():
     return _pipe
 
 
-# duration is the GPU reservation. ZeroGPU multiplies it by ~1.5 and caps the
-# result by the CALLER's quota — the public site calls anonymously, whose cap is
-# low, so 300 (→450) was rejected ("requested GPU duration larger than maximum
-# allowed") and SD never ran. 60 (→~90) fits an A10G 25-step SSD-1B run.
-@spaces.GPU(duration=60)
+# duration = the GPU reservation; ZeroGPU reserves ~duration×1.5 and debits it
+# from the caller's daily quota. An A10G 25-step SSD-1B run is ~20-30s, so 30
+# (→~45s reserved) keeps real headroom while stretching the quota (~33 pages/day
+# on PRO's ~25min). Don't drop much lower — a cold/slow run that exceeds it is killed.
+@spaces.GPU(duration=30)
 def run_sd_inference(prompt, negative_prompt, steps, guidance):
     """
     Run Stable Diffusion and return a PIL image.
