@@ -74,6 +74,26 @@ else:
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 _pipe = None
 
+def predownload_weights():
+    """
+    Pre-fetch the SD weights to the on-disk HF cache at startup (CPU, no GPU).
+
+    The first @spaces.GPU request otherwise has to DOWNLOAD ~9GB inside the 30s GPU
+    window — ZeroGPU kills it, so the first user after every rebuild/sleep gets a
+    cold-start error. Downloading here (outside the GPU window, no time limit) means
+    the first request only loads disk→GPU (fast). Safe to skip on failure.
+    """
+    model_id = cfg["stable_diffusion"]["model_id"]
+    try:
+        from huggingface_hub import snapshot_download
+        print(f"Pre-downloading {model_id} weights to disk cache...", flush=True)
+        t0 = time.time()
+        snapshot_download(model_id)
+        print(f"Model weights cached in {time.time() - t0:.0f}s.", flush=True)
+    except Exception as e:
+        print(f"Model pre-download skipped ({e}); will load lazily on first request.", flush=True)
+
+
 def get_pipeline():
     global _pipe
     if _pipe is None:
@@ -444,4 +464,5 @@ with gr.Blocks(title="Hebrew Braille Book Generator") as demo:
 # That path goes through the normal queue (same as the Python client), so ZeroGPU
 # schedules it and the file URLs come back ready. Nothing extra is needed here.
 if __name__ == "__main__":
+    predownload_weights()   # warm the on-disk weight cache before serving (avoids cold-start GPU-timeout)
     demo.launch()

@@ -24,7 +24,9 @@ Implementation notes:
 """
 
 import argparse
+import functools
 import math
+import time
 from pathlib import Path
 from typing import List, Tuple
 
@@ -36,6 +38,10 @@ import cadquery as cq
 import pyclipper
 
 from src.config import cfg
+
+# Force flushed prints: on HF Spaces stdout is a block-buffered pipe (not a TTY), so
+# unflushed build progress lags the log and the build looks "stuck at Text solids".
+print = functools.partial(print, flush=True)
 
 Point    = Tuple[float, float]
 CircleDef = Tuple[Tuple[float, float], float]
@@ -350,11 +356,17 @@ def create_base_plate() -> cq.Workplane:
 STROKE_TAPER_DEG = 15.0
 
 
-def _capped_solid(pts: List[Point], height: float, offset: float = None):
+def _capped_solid(pts: List[Point], height: float, offset: float = None, round_top: bool = True):
     """
-    Extrude polygon `pts` to `height`, returning a cq.Solid. When rounded tops are
-    enabled, apply a draft taper so the ridge narrows toward the top (finger-friendly,
-    no sharp edge); fall back to a straight extrude if the taper self-intersects.
+    Extrude polygon `pts` to `height`, returning a cq.Solid. When `round_top` and
+    rounded tops are enabled, apply a draft taper so the ridge narrows toward the top
+    (finger-friendly, no sharp edge); fall back to a straight extrude if the taper
+    self-intersects.
+
+    Taper is only worth attempting on wider features (text, image outlines). Thin
+    detail strokes (~0.8mm) almost always self-intersect at the taper angle, so the
+    attempt is wasted work (it fails, then we extrude flat anyway) — pass
+    round_top=False for those to skip straight to the flat extrude.
 
     A fresh Workplane is built for each attempt: a FAILED taper extrude still consumes
     the pending wire, so reusing one Workplane would make the fallback raise
@@ -365,7 +377,7 @@ def _capped_solid(pts: List[Point], height: float, offset: float = None):
     def _profile():
         return cq.Workplane("XY").workplane(offset=z).polyline(pts).close()
 
-    if EDGE_FILLET_ENABLED and STROKE_TAPER_DEG > 0:
+    if round_top and EDGE_FILLET_ENABLED and STROKE_TAPER_DEG > 0:
         try:
             return _profile().extrude(height, taper=STROKE_TAPER_DEG).val()
         except Exception:
@@ -474,11 +486,12 @@ def _extrude_one_centerline(
     half_width: float,
     stroke_height: float,
     idx: int,
+    round_top: bool = False,
 ) -> None:
     """
-    Simplify, stroke, and extrude one centerline path as a dome-topped ridge,
-    appending the resulting solids to `solids` (fused in one pass by the caller).
-    Fillet radius = stroke_height × EDGE_FILLET_RATIO approximates a semi-ellipse profile.
+    Simplify, stroke, and extrude one centerline path as a ridge, appending the
+    resulting solids to `solids`. `round_top` applies a draft taper (only worth it
+    for wide outlines; thin details stay flat — see _capped_solid).
     """
     pts = rdp_simplify(clean_polyline_points(pts, POINT_CLEAN_TOL), PATH_SIMPLIFY_TOL)
     if len(pts) < 2:
@@ -494,7 +507,7 @@ def _extrude_one_centerline(
             if polygon_area(p2) < 0:
                 p2 = list(reversed(p2))
             try:
-                solids.append(_capped_solid(p2, stroke_height))
+                solids.append(_capped_solid(p2, stroke_height, round_top=round_top))
             except Exception as e:
                 print(f"    Warning: image stroke {idx} polygon skipped: {e}")
 
@@ -532,12 +545,15 @@ def extrude_image_strokes(
 
     solids: List = []
     idx = 1
+    # Image ridges are thin (≤1.2mm) — flat vs tapered tops are indistinguishable by
+    # touch, and tapering hundreds of them is the dominant build cost on dense art.
+    # So keep image strokes flat; the taper is reserved for the (few) raised-text shapes.
     for pts in closed_paths:
         if abs(polygon_area(pts)) >= OUTLINE_MIN_AREA:
             h, w = outline_height, outline_width
         else:
             h, w = IMAGE_DETAIL_HEIGHT, IMAGE_DETAIL_WIDTH
-        _extrude_one_centerline(solids, pts, True,  w / 2, h, idx)
+        _extrude_one_centerline(solids, pts, True, w / 2, h, idx)
         idx += 1
 
     for pts in open_paths:
@@ -724,23 +740,32 @@ def create_one_page_stl_from_dxf(
     # slicer union the overlaps at print time — ~190× faster, valid for FDM.
     parts: List = []
     if text_shapes:
+        t0 = time.time()
         parts += extrude_text_solids(text_shapes, height=text_height)
+        print(f"    [t] text {time.time() - t0:.1f}s")
 
     if braille_circles:
+        t0 = time.time()
         parts += add_braille_domes(braille_circles)
+        print(f"    [t] braille {time.time() - t0:.1f}s")
 
     if image_dxf and (image_closed or image_open or image_circles):
+        t0 = time.time()
         parts += extrude_image_strokes(
             image_closed, image_open, image_circles,
             outline_height=stroke_height,
             outline_width=stroke_width,
         )
+        print(f"    [t] image strokes {time.time() - t0:.1f}s  (parts so far: {len(parts)})")
         if TEXTURE_ENABLED and image_closed:
             print("  Adding texture fills...")
+            t0 = time.time()
             parts += add_texture_fills(image_closed)
+            print(f"    [t] texture {time.time() - t0:.1f}s")
 
+    t0 = time.time()
     model = cq.Compound.makeCompound([base.val()] + parts)
-    print(f"  Assembled {len(parts)} feature solids (no boolean union)")
+    print(f"  Assembled {len(parts)} feature solids (no boolean union) in {time.time() - t0:.1f}s")
 
     out = Path(output) if output else None
     if out is None:
@@ -748,8 +773,9 @@ def create_one_page_stl_from_dxf(
         elif txt_dxf:  out = txt_dxf.with_suffix(".stl")
         else:          out = braille_dxf.with_suffix(".stl")
 
+    t0 = time.time()
     cq.exporters.export(model, str(out))
-    print(f"\nExported STL: {out}")
+    print(f"\nExported STL: {out}  ({time.time() - t0:.1f}s)")
 
     if export_step:
         step_out = out.with_suffix(".step")
