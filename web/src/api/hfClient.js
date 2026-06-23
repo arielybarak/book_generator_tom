@@ -117,19 +117,28 @@ export async function generatePage(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS)
   try {
-    // 1) Enqueue the job — positional payload in the endpoint's wired input order.
-    const postRes = await fetch(`${ROOT}/gradio_api/call/${ENDPOINT}`, {
+    // 1) Enqueue via our serverless proxy, which adds a server-side HF token so the
+    //    job runs on the owner's PRO ZeroGPU quota (the site can't carry a token).
+    //    Same-origin call; the token never reaches the browser.
+    const postRes = await fetch(`/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: [text, variations, imageDesc, objectClass] }),
+      body: JSON.stringify({
+        raw_text: text,
+        variations,
+        image_desc: imageDesc,
+        object_class: objectClass,
+      }),
       signal: controller.signal,
     })
-    if (!postRes.ok) throw new Error(`Enqueue failed (status ${postRes.status})`)
-    const { event_id: eventId } = await postRes.json()
-    if (!eventId) throw new Error('No event_id returned from /gradio_api/call')
+    const enq = await postRes.json().catch(() => ({}))
+    if (!postRes.ok || !enq.event_id) {
+      throw new Error(enq.detail || enq.error || `Enqueue failed (status ${postRes.status})`)
+    }
+    const root = enq.root || ROOT
 
-    // 2) Stream the result until the job completes.
-    const data = await readResultStream(`${ROOT}/gradio_api/call/${ENDPOINT}/${eventId}`, controller.signal)
+    // 2) Stream the result directly from the Space (no token needed for retrieval).
+    const data = await readResultStream(`${root}/gradio_api/call/${ENDPOINT}/${enq.event_id}`, controller.signal)
     if (!Array.isArray(data)) throw new Error('Unexpected result shape from /generate_page')
     const [image, stl] = data
     return { imageUrl: fileUrl(image), stlUrl: fileUrl(stl) }
