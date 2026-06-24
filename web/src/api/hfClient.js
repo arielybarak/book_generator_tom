@@ -136,6 +136,14 @@ export async function generatePage(
       }),
       signal: controller.signal,
     })
+    if (postRes.status === 401) {
+      // The stored session is stale/invalid for the current Supabase project (e.g.
+      // a token minted before setup was finalised, or a revoked/rotated session).
+      // Clear it so onAuthStateChange flips the app back to the login screen
+      // instead of surfacing an opaque "generation failed".
+      await supabase.auth.signOut()
+      throw new Error('not-authenticated')
+    }
     const enq = await postRes.json().catch(() => ({}))
     if (!postRes.ok || !enq.event_id) {
       throw new Error(enq.detail || enq.error || `Enqueue failed (status ${postRes.status})`)
