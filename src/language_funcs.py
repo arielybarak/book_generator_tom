@@ -177,7 +177,7 @@ def letter_to_braille(base, marks):
 def convert_to_braille(text):
     """
     Convert Hebrew text (with optional nikud) to a Braille Unicode string.
-    Result is reversed so it reads left-to-right for tactile use.
+    Output is left-to-right (Braille is always read LTR regardless of source language).
     """
     result = []
     i = 0
@@ -194,7 +194,7 @@ def convert_to_braille(text):
         else:
             result.append(ch)
             i += 1
-    return "".join(result[::-1])
+    return "".join(result)
 
 
 # ── English → Braille (Grade 1, uncontracted) ─────────────────────────────────
