@@ -22,15 +22,15 @@ layout:
 tactile:
 
   # Height hierarchy — taller = more prominent to touch
-  image_outline_height_mm: 1.2   # main contours (tallest — primary shapes to trace)
-  image_detail_height_mm: 0.7    # inner / secondary lines
-  text_height_mm: 1.0            # raised Hebrew text (sighted adult reads aloud)
-  braille_dot_height_mm: 0.6     # Braille dome height above base
-  braille_dot_radius_mm: 0.75    # standard Grade 1 Braille dot radius
+  image_outline_height_mm: 1.8      # main contours (tallest — primary shapes to trace)
+  image_detail_height_mm: 0.0       # DISABLED — no inner details for ultra-simple shapes
+  text_height_mm: 1.0               # raised Hebrew text (sighted adult reads aloud)
+  braille_dot_height_mm: 0.6        # Braille dome height above base
+  braille_dot_radius_mm: 0.75       # standard Grade 1 Braille dot radius
 
   # Line widths — wider lines are easier to feel
-  image_outline_width_mm: 1.2    # minimum 1.2mm for reliable FDM printing
-  image_detail_width_mm: 0.8
+  image_outline_width_mm: 1.8       # bolder strokes = simpler, less fragile
+  image_detail_width_mm: 0.0        # DISABLED
 
   # Path classification: closed paths with |area| ≥ this (mm²) are "main outlines"
   outline_min_closed_area_mm2: 100.0
@@ -43,15 +43,15 @@ tactile:
 
   # Douglas-Peucker simplification applied to all contour paths before extrusion.
   # Removes micro-jaggedness from rasterised contours.
-  path_simplification_tolerance_mm: 0.3
+  path_simplification_tolerance_mm: 0.5
 
   # Texture fill inside large closed regions
-  texture_enabled: true
+  texture_enabled: false             # DISABLED for ultra-simple shapes
   texture_large_region_min_area_mm2: 300.0   # parallel ridges
   texture_medium_region_min_area_mm2: 80.0   # crosshatch
   texture_ridge_spacing_mm: 1.5
   texture_ridge_width_mm: 0.5
-  texture_height_mm: 0.3                     # lower than outline — subtle fill
+  texture_height_mm: 0.3             # lower than outline — subtle fill
 
 # Stable Diffusion image generation
 stable_diffusion:

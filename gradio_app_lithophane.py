@@ -162,14 +162,17 @@ def generate_page_assets(page_data, output_dir):
     eng_class = hebrew_translator(obj_class)
 
     style_prompt = (
-        "Simple child's drawing, 2D flat design, outlines only, "
-        "single thin black pen, minimalistic, continuous single pen draw, "
-        "broad strokes, white background."
+        "icon, symbol, pictogram, single shape, basic geometric form, "
+        "child's drawing, crayon sketch, stick figure style, "
+        "ultra-minimal, flat solid shape, one color outline only, "
+        "no details, no texture, bold thick line, plain white background"
     )
     negative_prompt = (
-        "background, scenery, environment, extra items, shading, shadows, "
-        "gradients, grayscale, fine lines, intricate details, realistic texture, "
-        "dots, 3D, depth, perspective, messy lines, broken lines."
+        "shading, gradients, texture, hatching, crosshatching, fill, solid color, "
+        "photorealistic, complex background, decorative, small details, "
+        "thin lines, clutter, noise, realistic lighting, busy composition, "
+        "interior detail, internal lines, patterns, perspective, 3D effect, "
+        "shadows, highlights, multiple objects"
     )
     final_prompt = (
         f"A single isolated {eng_desc} centered on a white background, "
@@ -186,9 +189,29 @@ def generate_page_assets(page_data, output_dir):
         )
         if image is not None:
             image.save(img_path)
-            # Skeletonize → single-pixel-wide lines (avoids double-traced strokes)
+            # Convert to grayscale, thicken lines, remove small details
             gray = np.array(image.convert("L"))
-            image_to_dxf_exact(gray, dxf_img_path)
+            
+            # Use threshold instead of skeletonization for bolder, simpler shapes
+            _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+            
+            # Dilate to thicken lines
+            kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            binary = cv2.dilate(binary, kernel_dilate, iterations=2)
+            
+            # Erode slightly to clean up
+            kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            binary = cv2.erode(binary, kernel_erode, iterations=1)
+            
+            # Remove small noise (keep only major shapes)
+            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+            clean = np.zeros_like(binary)
+            for i in range(1, num_labels):
+                if stats[i, cv2.CC_STAT_AREA] >= 200:
+                    clean[labels == i] = 255
+            
+            gray = cv2.bitwise_not(clean)
+            image_to_dxf_exact(gray, dxf_img_path, simplify_epsilon=3.5)
         else:
             print(f"Pipeline unavailable — skipping image for page {page_num}.")
     except Exception as e:

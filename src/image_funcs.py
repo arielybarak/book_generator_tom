@@ -55,11 +55,11 @@ def convert_tensor_to_pil_img(tensor):
 
 # ── Image → DXF ────────────────────────────────────────────────────────────────
 
-def image_to_dxf_exact(image_bw, out_path, canvas_cm=150):
+def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=3.5):
     """
     Convert a grayscale/binary numpy image to a DXF polyline file.
-    Uses Zhang-Suen skeletonization for single-pixel-wide lines and
-    approxPolyDP simplification for smaller, cleaner files.
+    Uses thresholding for bold shapes, then aggressive contour simplification.
+    simplify_epsilon: larger = more aggressive simplification (fewer points, cleaner)
     """
     canvas_mm = canvas_cm * 10.0
 
@@ -73,32 +73,24 @@ def image_to_dxf_exact(image_bw, out_path, canvas_cm=150):
 
     _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
 
-    # Skeletonize to single-pixel-wide lines (requires opencv-contrib)
-    try:
-        edges = cv2.ximgproc.thinning(bin_img, thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
-    except AttributeError:
-        print("Warning: cv2.ximgproc not found — falling back to Canny (double lines).")
-        edges = cv2.Canny(bin_img, 50, 150)
+    # Thicken shapes for better 3D printability
+    kernel_thick = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    bin_img = cv2.dilate(bin_img, kernel_thick, iterations=1)
 
-    # Remove tiny noise specks
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(edges, connectivity=8)
-    clean = np.zeros_like(edges)
-    for i in range(1, num_labels):
-        if stats[i, cv2.CC_STAT_AREA] >= 15:
-            clean[labels == i] = 255
-    edges = clean
-
-    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         print(f"Warning: no contours found for {out_path}")
         return
 
-    y_coords, x_coords = np.nonzero(edges)
-    if len(x_coords) == 0:
+    # Filter tiny contours (noise)
+    contours = [c for c in contours if cv2.contourArea(c) >= 100]
+    if not contours:
+        print(f"Warning: no significant contours after filtering for {out_path}")
         return
 
-    min_x, max_x = x_coords.min(), x_coords.max()
-    min_y, max_y = y_coords.min(), y_coords.max()
+    all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
+    min_x, min_y = all_pts.min(axis=0)
+    max_x, max_y = all_pts.max(axis=0)
     w_px = max_x - min_x + 1
     h_px = max_y - min_y + 1
 
@@ -114,10 +106,12 @@ def image_to_dxf_exact(image_bw, out_path, canvas_cm=150):
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
 
+    # Aggressive simplification: reduce vertices dramatically
     for c in contours:
-        approx = cv2.approxPolyDP(c, epsilon=1.0, closed=True)
+        arc_len = cv2.arcLength(c, True)
+        approx = cv2.approxPolyDP(c, epsilon=simplify_epsilon, closed=True)
         pts = [px_to_mm(p[0]) for p in approx]
-        if len(pts) > 1:
+        if len(pts) > 2:
             msp.add_lwpolyline(pts, close=True)
 
     doc.saveas(out_path)
