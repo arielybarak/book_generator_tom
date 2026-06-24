@@ -14,6 +14,8 @@
  * the stream alive, then `event: complete` with the output files (URLs already
  * served thanks to the gr.File outputs).
  */
+import { supabase } from '../lib/supabase'
+
 const SPACE = import.meta.env.VITE_HF_SPACE || 'MLightning/text2STL-engine-2.0-superMX-bottom'
 
 // HF Space subdomain: owner/name lowercased, every non-alphanumeric run → "-".
@@ -120,9 +122,11 @@ export async function generatePage(
     // 1) Enqueue via our serverless proxy, which adds a server-side HF token so the
     //    job runs on the owner's PRO ZeroGPU quota (the site can't carry a token).
     //    Same-origin call; the token never reaches the browser.
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) throw new Error('not-authenticated')
     const postRes = await fetch(`/api/generate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
       body: JSON.stringify({
         raw_text: text,
         variations,

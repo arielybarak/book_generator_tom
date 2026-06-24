@@ -67,6 +67,22 @@ export const COPY = {
       arrowPrev: '→',
       viewer: 'תצוגה תלת־ממדית של העמוד — אפשר לסובב',
     },
+
+    auth: {
+      loginTitle: 'כניסה',
+      signupTitle: 'הרשמה',
+      username: 'שם משתמש',
+      password: 'סיסמה',
+      loginCta: 'כניסה',
+      signupCta: 'הרשמה',
+      toggleToSignup: 'עוד אין לכם חשבון? הירשמו כאן',
+      toggleToLogin: 'כבר יש לכם חשבון? היכנסו כאן',
+      logout: 'יציאה',
+      errorInvalid: 'שם המשתמש או הסיסמה שגויים',
+      errorSignup: 'ההרשמה נכשלה. ייתכן ששם המשתמש כבר תפוס',
+      errorUsername: 'שם המשתמש חייב להכיל לפחות 3 תווים (אותיות, ספרות, _ . -)',
+      errorPassword: 'הסיסמה חייבת להכיל לפחות 6 תווים',
+    },
   },
 
   english: {
@@ -131,6 +147,22 @@ export const COPY = {
       arrowNext: '→', // LTR: forward points right
       arrowPrev: '←',
       viewer: '3D preview of the page — you can rotate it',
+    },
+
+    auth: {
+      loginTitle: 'Log in',
+      signupTitle: 'Sign up',
+      username: 'Username',
+      password: 'Password',
+      loginCta: 'Log in',
+      signupCta: 'Sign up',
+      toggleToSignup: 'No account yet? Sign up here',
+      toggleToLogin: 'Already have an account? Log in here',
+      logout: 'Log out',
+      errorInvalid: 'Incorrect username or password',
+      errorSignup: 'Sign-up failed. That username may already be taken',
+      errorUsername: 'Username must be at least 3 characters (letters, digits, _ . -)',
+      errorPassword: 'Password must be at least 6 characters',
     },
   },
 }

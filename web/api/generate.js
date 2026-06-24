@@ -10,7 +10,10 @@
  * works without auth), so this function stays fast (<1s) and can't hit a timeout.
  *
  * Env: HF_TOKEN (required, a PRO account token), HF_SPACE (optional, defaults below).
+ *      SUPABASE_URL + SUPABASE_ANON_KEY (required — validate the caller's JWT).
  */
+import { createClient } from '@supabase/supabase-js'
+
 const SPACE = process.env.HF_SPACE || 'MLightning/text2STL-engine-2.0-superMX-bottom'
 const SLUG = SPACE.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 const ROOT = `https://${SLUG}.hf.space`
@@ -20,6 +23,21 @@ export default async function handler(req, res) {
     res.status(405).json({ error: 'method_not_allowed' })
     return
   }
+
+  // ── Auth gate (real security boundary — protects the owner's GPU quota) ──────
+  const jwt = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  if (!jwt) {
+    res.status(401).json({ error: 'unauthorized' })
+    return
+  }
+  const supabaseAdmin = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY)
+  const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(jwt)
+  if (authErr || !user) {
+    res.status(401).json({ error: 'unauthorized' })
+    return
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const token = process.env.HF_TOKEN
   if (!token) {
     res.status(500).json({ error: 'server_misconfigured', detail: 'HF_TOKEN is not set' })

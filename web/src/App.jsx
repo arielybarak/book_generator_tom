@@ -4,7 +4,9 @@ import { Stepper } from './components/Stepper'
 import { Landing } from './components/Landing'
 import { BookBuilder } from './components/BookBuilder'
 import { GenerateStep } from './components/GenerateStep'
+import { AuthScreen } from './components/AuthScreen'
 import { useLang } from './lib/i18n'
+import { useAuth } from './lib/auth'
 
 // three.js is ~700 kB — only load it when the user reaches the download step.
 const DownloadStep = lazy(() => import('./components/DownloadStep'))
@@ -52,6 +54,8 @@ function LanguageSwitcher() {
 
 function Header({ step, onStepClick }) {
   const { t } = useLang()
+  const { session, signOut } = useAuth()
+  const username = session?.user?.email?.split('@')[0] ?? null
   return (
     <header className="border-line bg-paper/80 sticky top-0 z-10 border-b backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-4">
@@ -64,6 +68,18 @@ function Header({ step, onStepClick }) {
         <div className="flex items-center gap-3">
           <Stepper current={step} onStepClick={onStepClick} />
           <LanguageSwitcher />
+          {session && (
+            <div className="flex items-center gap-2">
+              {username && <span className="text-muted hidden text-sm sm:inline">{username}</span>}
+              <button
+                type="button"
+                onClick={signOut}
+                className="text-muted hover:text-ink text-sm font-semibold transition"
+              >
+                {t.auth.logout}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </header>
@@ -71,6 +87,7 @@ function Header({ step, onStepClick }) {
 }
 
 export default function App() {
+  const { session, loading: authLoading } = useAuth()
   const saved = loadState()
   const [step, setStep] = useState(saved?.step ?? 0)
   const [book, setBook] = useState(saved?.book ?? { title: '', pages: [] })
@@ -110,13 +127,26 @@ export default function App() {
             <BookBuilder book={book} setBook={setBook} onGenerate={() => setStep(2)} />
           )}
           {step === 2 && (
-            <GenerateStep
-              book={book}
-              results={results}
-              setResults={setResults}
-              onNext={() => setStep(3)}
-              onBack={() => goTo(1)}
-            />
+            authLoading
+              ? (
+                <div className="flex min-h-96 items-center justify-center">
+                  <span
+                    className="border-brand-soft border-t-brand inline-block h-10 w-10 animate-spin rounded-full border-4"
+                    aria-label="…"
+                  />
+                </div>
+              )
+              : session
+                ? (
+                  <GenerateStep
+                    book={book}
+                    results={results}
+                    setResults={setResults}
+                    onNext={() => setStep(3)}
+                    onBack={() => goTo(1)}
+                  />
+                )
+                : <AuthScreen />
           )}
           {step === 3 && (
             <Suspense
