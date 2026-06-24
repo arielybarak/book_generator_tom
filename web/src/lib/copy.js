@@ -83,6 +83,10 @@ export const COPY = {
       errorUsername: 'שם המשתמש חייב להכיל לפחות 3 תווים (אותיות, ספרות, _ . -)',
       errorPassword: 'הסיסמה חייבת להכיל לפחות 6 תווים',
     },
+
+    footer: {
+      projectOf: 'פרויקט של',
+    },
   },
 
   english: {
@@ -163,6 +167,10 @@ export const COPY = {
       errorSignup: 'Sign-up failed. That username may already be taken',
       errorUsername: 'Username must be at least 3 characters (letters, digits, _ . -)',
       errorPassword: 'Password must be at least 6 characters',
+    },
+
+    footer: {
+      projectOf: 'A project of',
     },
   },
 }

@@ -60,9 +60,7 @@ function Header({ step, onStepClick }) {
     <header className="border-line bg-paper/80 sticky top-0 z-10 border-b backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-4">
         <div className="flex items-center gap-2">
-          <span className="bg-brand flex h-9 w-9 items-center justify-center rounded-2xl text-lg font-bold text-white">
-            ✦
-          </span>
+          <img src="/tom-logo.png" alt="" className="h-9 w-auto" />
           <span className="text-ink text-xl font-bold">{t.appName}</span>
         </div>
         <div className="flex items-center gap-3">
@@ -83,6 +81,28 @@ function Header({ step, onStepClick }) {
         </div>
       </div>
     </header>
+  )
+}
+
+function Footer() {
+  const { t } = useLang()
+  return (
+    <footer className="border-line mt-12 border-t">
+      <div className="text-muted mx-auto flex max-w-5xl items-center justify-center gap-3 px-6 py-6 text-sm">
+        <img src="/tom-logo.png" alt="" className="h-6 w-auto" />
+        <span>
+          {t.footer.projectOf}{' '}
+          <a
+            href="https://tomglobal.org"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent font-semibold hover:underline"
+          >
+            TOM — Tikkun Olam Makers
+          </a>
+        </span>
+      </div>
+    </footer>
   )
 }
 
@@ -163,6 +183,7 @@ export default function App() {
             </Suspense>
           )}
         </main>
+        <Footer />
       </div>
     </MotionConfig>
   )
