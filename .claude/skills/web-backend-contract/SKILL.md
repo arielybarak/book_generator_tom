@@ -1,9 +1,9 @@
 ---
 name: web-backend-contract
 description: >-
-  TOM hfClient.js contract: Gradio 2-step REST (never @gradio/client), CORS
-  credentials-strip shim, wakeUp, SSE decoder. USE WHEN editing
-  web/src/api/hfClient.js or web-facing Space endpoints.
+  TOM hfClient.js contract: Gradio 2-step REST (never @gradio/client), CORS credentials-strip
+  shim, wakeUp, SSE decoder; generate_page takes 5 inputs [text, variations, img_desc,
+  obj_class, language]. USE WHEN editing hfClient.js, /generate_page inputs, or lib/i18n.jsx.
 ---
 
 # Web ↔ Space call contract
@@ -34,11 +34,17 @@ slug = Space id lowercased, every non-alphanum run → `-`.
 (`SPACE = MLightning/text2STL-engine-2.0-superMX-bottom`, slug already computed in `hfClient.js`)
 
 ### generate_page inputs / outputs
-- **Inputs (positional):** `[raw_text, variations, image_desc, object_class]`
-  - `raw_text`: Hebrew string
-  - `variations`: `{ "<charIndex>": "<key>" }` nikud choices (keys from `web/src/lib/nikud.js`)
-  - `image_desc` / `object_class`: short picture hint (Hebrew or English)
+- **Inputs (positional):** `[raw_text, variations, image_desc, object_class, language]`
+  - `raw_text`: text string (Hebrew or English depending on `language`)
+  - `variations`: `{ "<charIndex>": "<key>" }` nikud choices (Hebrew only; pass `{}` for English)
+  - `image_desc` / `object_class`: short picture hint
+  - `language`: `"hebrew"` | `"english"` — routes to the correct braille encoder in `src/language_funcs.py` ([[hebrew-braille-nikud]]); also controls `rtl=` for text DXF and the response locale
 - **Outputs:** `[image, stl]` — each a Gradio file object `{ url: "…/gradio_api/file=/tmp/gradio/…" }`
+
+**i18n threading:** `language` flows from the frontend locale (provided by `web/src/lib/i18n.jsx`
+React context) → `hfClient.generatePage(text, variations, desc, cls, language)` → the POST body's
+5th element. If you add a new language, update both the i18n provider and `text_to_braille()` in
+`src/language_funcs.py`.
 
 Normalize output with `fileUrl(item)` (handles `{ url }`, `{ path }`, or plain string).
 

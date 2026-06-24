@@ -1,36 +1,39 @@
 ---
 name: image-dxf-generation
 description: >-
-  TOM PNG→DXF in src/image_funcs.py — SD line-art, skeletonization to DXF, Braille
-  blobs; needs opencv-contrib-python. USE WHEN editing image generation or debugging
-  double-line / missing-glyph / empty-DXF output.
+  TOM PNG/text→DXF in src/image_funcs.py (engine-2.0) — text via FILLED glyph contours
+  (_filled_glyphs_to_dxf, RETR_EXTERNAL) not skeletonization; braille placed programmatically from
+  Unicode bits, not blob detection. USE WHEN editing DXF generation or debugging invisible text /
+  broken strokes / stretched braille / empty DXF.
 ---
 
-# Image generation → DXF
+# Image / text / braille → DXF (engine-2.0)
 
-The middle of the pipeline: Stable Diffusion makes line-art PNGs, then `src/image_funcs.py`
-turns each PNG into a single-stroke DXF (image, text, Braille) that `src/dxf_3d.py` extrudes.
+`src/image_funcs.py` turns each layer into a DXF that `src/dxf_3d.py` extrudes
+([[tactile-stl-geometry]]). The engine-2.0 rewrite changed HOW text and braille become geometry —
+the old skeletonization / blob-detection approaches are now **wrong** and produce silent garbage.
 
 ## When to Activate This Skill
-- "double lines in the image", "the DXF is empty", "Braille glyphs missing", "font error"
-- Editing `image_to_dxf_exact`, `process_image_to_dxf`, `png_to_dxf`, `generate_braille_dxf_from_text`, `generate_hebrew_text_dxf`, or `src/image_generator.py`
-- Changing the SD model or inference params
+- "text is invisible / broken strokes", "braille is stretched", "DXF is empty", "glyphs missing"
+- Editing `image_to_dxf_exact`, `generate_text_dxf`, or `generate_braille_dxf_from_text`
 
-## The trap that bites silently: opencv-contrib
-`image_to_dxf_exact()` calls `cv2.ximgproc.thinning(..., THINNING_ZHANGSUEN)` for single-pixel
-skeletonization. That lives **only in `opencv-contrib-python`** — with plain `opencv-python` the
-code prints `Warning: cv2.ximgproc not found — falling back to Canny (double lines)` and produces
-**doubled outlines** instead of clean single strokes. The warning scrolls past; the bad DXF looks
-plausible. If you see double lines, check the install (`opencv-contrib-python`, not `opencv-python`
-— also in `.claude/instructions/python.instructions.md`). On the Space, fix it in
-`hf_space/requirements.txt`.
+## Text = FILLED glyph contours, NOT skeletonization
+`generate_text_dxf(text, out, rtl=)` builds **filled glyph contours** via `_filled_glyphs_to_dxf`
+(OpenCV `RETR_EXTERNAL` on the rasterized glyph). **Do not skeletonize letters** — Zhang-Suen
+thinning on filled glyphs produces invisible, broken single-pixel strokes (the old bug). Filled
+contours extrude into solid, legible raised letters.
 
-## The other first-run trap: the Braille font
-`ensure_font()` downloads **`NotoSansSymbols2-Regular.ttf`** (from `FONT_URL`) on first use for
-Braille rendering. First run needs network and is slow; if Braille glyphs are missing, the font
-download failed — check connectivity / the URL, not the Braille logic.
+## Braille = programmatic from Unicode bits, NOT blob detection
+`generate_braille_dxf_from_text(braille_unicode, out)` places dots **programmatically from the
+Unicode braille bit pattern at fixed Grade-1 spacing (≈2.5 mm)**. Do NOT recover braille by
+blob-detecting a rendered image — that stretched short words (variable spacing). The Unicode string
+comes from `text_to_braille(text, language)` in `src/language_funcs.py` ([[hebrew-braille-nikud]]).
 
-## Conventions
-- SD config comes from `config.yaml` → `stable_diffusion` (`model_id: segmind/SSD-1B`, `inference_steps: 25`, `guidance_scale: 8.5`). Needs ~6 GB GPU; on the Space it runs under `@spaces.GPU` (ZeroGPU).
-- DXF canvas defaults to `canvas_cm=150` across `*_to_dxf` functions — keep it consistent with the plate size in [[tactile-stl-geometry]].
-- After editing `src/`, **run `./sync_to_space.sh`** to deploy the change (see [[hf-space-sync-deploy]]).
+## Entry points (used by [[/stl-bench]])
+- `image_to_dxf_exact(gray, out)` — image line-art → DXF (the picture band).
+- `generate_text_dxf(text, out, rtl=)` — Hebrew (`rtl=True`) / English (`rtl=False`).
+- `generate_braille_dxf_from_text(braille_unicode, out)` — braille dots.
+
+`ensure_font()` still downloads the glyph font on first use (needs network); missing glyphs on a
+fresh env usually means that download failed, not a logic bug. After editing `src/`, run
+`./sync_to_space.sh` then deploy ([[hf-space-sync-deploy]]).

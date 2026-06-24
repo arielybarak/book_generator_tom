@@ -41,6 +41,17 @@ flowchart TD
     STL --> BRL["⠃  Braille domes\nHemisphere bumps — child reads independently"]
 ```
 
+### Two STL engines
+
+TOM ships **two interchangeable ways** to turn the page layers into an STL:
+
+| Engine | Module | Approach | Used by |
+|---|---|---|---|
+| **CadQuery / DXF** | `src/dxf_3d.py` | 3 DXFs → true 3D solids via CadQuery + pyclipper: extruded text, hemisphere Braille domes, dome-profile image ridges, optional hatch texture. Precise geometry, heavier deps. | `hf_space/gradio_app.py`, CLI, FlowManager |
+| **Lithophane / heightmap** | `src/lithophane.py` | Flatten all three layers into one grayscale heightmap (brightness → Z), mesh directly to a watertight STL. CadQuery-free, simpler, faster. | `hf_space/gradio_app_lithophane.py` (**deployed**) |
+
+The deployed Space runs the **lithophane** variant; the **CadQuery** path is the canonical solid-modeling engine used from the CLI and notebooks.
+
 ---
 
 ## Deployment
@@ -80,7 +91,8 @@ book_generator_tom/
 │   ├── language_funcs.py     # Hebrew ↔ Braille, translation, nikud disambiguation
 │   ├── image_funcs.py        # Image processing, PNG → DXF, font setup
 │   ├── image_generator.py    # Stable Diffusion pipeline wrapper
-│   ├── dxf_3d.py             # 3 DXF files → single STL (CadQuery + pyclipper)
+│   ├── dxf_3d.py             # STL engine 1 — 3 DXF files → solid STL (CadQuery + pyclipper)
+│   ├── lithophane.py         # STL engine 2 — layers → heightmap → mesh STL (CadQuery-free, deployed)
 │   ├── flow_manager.py       # Multi-page book orchestrator (CLI use)
 │   └── config.py             # Loads config.yaml and exposes `cfg` dict
 ├── web/                      # React frontend (React 19 + Vite + Tailwind v4) → Vercel

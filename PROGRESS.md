@@ -1,76 +1,73 @@
-# PROGRESS — TOM website (web/) + HF backend endpoint
+# PROGRESS — TOM (CadQuery tactile-page engine + bilingual website)
 
-Living status for the public Hebrew website over the HF Gradio backend.
-Durable design/decisions live elsewhere — this file is the **transient snapshot**:
-what's done, what's left, and known caveats. Update it as work proceeds.
+Living status snapshot. Durable conventions live in `CLAUDE.md`, `web/CLAUDE.md`, and
+`.claude/skills/`; this file tracks **what changed, why, and known caveats.**
 
-**Detail lives in:**
-- Plan: `~/.claude/plans/thanks-make-a-plan-cosmic-pebble.md`
-- Conventions: `web/CLAUDE.md` (API contract, Hebrew no-jargon glossary, RTL/brand)
-- Decisions/gotchas: memory `website-frontend`, `hf-deploy-gotchas`, `barak-style`
-- Deployed HF app: `hf_space/gradio_app_lithophane.py`
+_Last updated: 2026-06-23._
 
-_Last updated: 2026-06-11._
+## Current state — LIVE
 
-## ✅ Done (code-complete; `npm run build` + ESLint clean)
-- **Frontend** `web/` — React 19 + Vite + Tailwind v4 (tokens in `src/index.css @theme`),
-  framer-motion, three.js. 4-step flow in `src/App.jsx`: Landing → BookBuilder → GenerateStep
-  → DownloadStep. Components in `src/components/` (+ `ui/`); friendly nikud chips
-  (`NikudChooser` + `lib/nikud.js`); 3D `StlViewer`; client `src/api/hfClient.js`; copy `src/lib/copy.js`.
-- **Backend** — hidden `/generate_page` endpoint added to `hf_space/gradio_app_lithophane.py`
-  (deployed) and `hf_space/gradio_app.py`. Compiles. **NOT pushed to HF yet.**
-- **Setup** — `web/CLAUDE.md`, `web/fixtures/sample-book.json`, memory entries.
-- **Phase 6 polish** (2026-06-11):
-  - Code-split three.js: `DownloadStep` is now `React.lazy()` — initial bundle 374 kB (was ~911 kB),
-    three.js loads only when user reaches step 4 (separate 539 kB chunk).
-  - Landing page gallery: 3 example tactile-page cards (cat/dog/flower) below the hero with a 2nd CTA.
-  - `TactilePageMock` now accepts `word` prop and renders a matching SVG illustration.
-  - Fixed `GenerateStep` queue detection: was checking `stage === 'in_queue'` (not a real stage value),
-    now correctly checks `msg.queue === true || position > 0` per actual `@gradio/client` v2 spec.
-  - Added `aria-label="תוכן ראשי"` to `<main>` for screen-reader landmark.
-  - `web/README.md` with Vercel deploy steps (replaces Vite boilerplate).
-- **Phase 7 — a11y pass** (2026-06-11) via headless Playwright + extracted `libasound2`:
-  - ✅ RTL direction, Hebrew headings, `<main>` landmark, no missing image alt text — all pass.
-  - **Fixed**: Focus ring was white on colored buttons (Tailwind's `transition` includes `outline-color`;
-    ring animated in from white → near-invisible on cream background). Fix: pre-set
-    `outline-color: var(--color-accent)` on all focusable elements in `index.css` so the transition
-    starts at the correct teal colour. Also hardened `:is()` over `:where()` for specificity.
-  - **Fixed**: Mobile Stepper overflow — step 4 circle clipped at left edge (390px viewport).
-    Fix: connector lines `hidden sm:inline-block`, circles `h-7 w-7 sm:h-8 sm:w-8` — all 4
-    steps fully visible on mobile without overflow.
-  - Visual screenshots in `web/playwright-shots/` (not committed).
+- **Deployed engine: CadQuery solid** (`src/dxf_3d.py`) via `hf_space/gradio_app_lithophane.py`
+  (filename keeps the historical suffix; the heightmap engine in `src/lithophane.py` is engine-2,
+  unused in prod). Produces a 150×150mm plate, three non-overlapping tactile bands.
+- **Bilingual** — Hebrew/English across UI (header switcher, RTL↔LTR) and generated content
+  (text + Braille). Per-page **generation timer** in the web UI.
+- Web frontend on Vercel; backend on HF Space (ZeroGPU, owner PRO quota via the `/api/generate` proxy).
 
-## ⏳ Pending / blockers
-1. **Push HF backend** to deploy `/generate_page` (needed for live generation). Commit `7f865c0`
-   is ready in `hf_space/`. Auth/http gotchas: memory `hf-deploy-gotchas`. Run manually:
-   ```bash
-   cd ~/book_generator_tom/hf_space
-   HF_TOKEN=$(cat ~/.cache/huggingface/token)
-   git push "https://MLightning:${HF_TOKEN}@huggingface.co/spaces/MLightning/text2STL-engine-2.0-superMX-bottom" main
-   ```
-2. **End-to-end live test** after the HF push: add page → generate → image+STL URLs → 3D preview → download.
-3. **Main-repo git commit** — web/, hf_space submodule pointer, .claude/, README.md, CLAUDE.md,
-   PROGRESS.md are all ready to stage. Commit only when barak asks.
-4. **Vercel deploy** — connect `web/` to a Vercel project, set `VITE_HF_SPACE`.
+---
 
-## Playwright notes (for future sessions)
-- Chromium is at `~/.cache/ms-playwright/chromium-1223/` but needs `libasound2`.
-- Workaround: `apt-get download libasound2 && dpkg-deb -x libasound2_*.deb /tmp/alsa_extract`
-  then prefix: `LD_LIBRARY_PATH=/tmp/alsa_extract/usr/lib/x86_64-linux-gnu node script.mjs`
-- Playwright MCP defaults to `chrome` channel; no sudo → can't install.
-  Real fix: `sudo apt install libasound2` or run test scripts via Bash directly.
+## 2026-06-23 — CadQuery migration + bug log (focus: how each bug was solved)
 
-## ⚠ Caveats (assumptions made without live testing)
-- `hfClient.js` assumes `@gradio/client` v2 message shapes — verified against the source:
-  `msg.type === 'status'/'data'` ✓, `msg.stage` ✓, `msg.queue` ✓, `msg.position` ✓.
-  Still need to validate against the real live endpoint (file URLs, etc.).
-- `StlViewer` lays the plate flat via `mesh.rotation.x = -Math.PI/2` (a guess) — confirm the STL
-  up-axis visually; fix orientation if needed.
-- `web/src/lib/nikud.js` option keys MUST mirror `SPECIAL_REPLACEMENTS` in `src/language_funcs.py`.
+Switched the deployed product from the lithophane **heightmap** engine to the CadQuery
+**solid** engine. Chose to swap the engine *inside* the deployed app rather than flip
+`app_file` to `gradio_app.py` — that app was 3 commits stale and would have regressed
+`ping_assets`/`slow_ping`, the `gr.Error` clean-fail, and the `gr.File` image-403 fix.
 
-## Run
+Each bug below was found by measuring on a **real** SD image (`outputs/output.png`, 559 paths),
+not a toy — the toy cases hid every one of them.
+
+| # | Bug (symptom) | Root cause | Fix |
+|---|---|---|---|
+| 1 | STL build took **minutes→hours**, site hung | `base.union(solid)` **per piece** (text/dot/stroke/texture) — each fuse re-triangulates the whole growing model → ~O(N²); real page = thousands of overlapping solids | First batched into one compound + single fuse; but at 559 paths even one general fuse = **2.4 hr**. Real fix: **no boolean at all** — emit a multi-volume mesh (`cq.Compound.makeCompound`) and let the **slicer** union overlaps at print time. **2.4hr → ~60s (~190×).** |
+| 2 | Even no-fuse build still slow on busy art | OCCT **fillet** (rounded ridge tops) = ~88% of build time | Replaced fillet with a draft **taper** at extrude time (cheap rounded top). |
+| 3 | Text/strokes silently **dropped** (`No pending wires present`) | A *failed* taper extrude still consumes the Workplane's pending wire, so the flat-extrude fallback found nothing | Build a **fresh** Workplane per attempt (`_capped_solid`). |
+| 4 | Live worker **crashed**, log died after `Text solids: 3`; user saw "שגיאה" | `extrude(taper=)` **segfaults OCCT** on real Hebrew glyph outlines (reproduced on פרח) — a C-level crash that kills the whole process | **Disabled taper → flat tops** (`STROKE_TAPER_DEG = 0`). Robust; rounded tops would need a crash-isolated subprocess. |
+| 5 | First generation after every deploy **errored (~3 min)** | Rebuild wipes the 8.9 GB SD model cache; `from_pretrained` re-downloads **inside** the 30 s `@spaces.GPU` window → ZeroGPU kills it | **Pre-download weights at startup** (`predownload_weights()`, CPU, outside the GPU window). |
+| 6 | Logs "stuck at Text solids" (looked hung) | HF stdout is a **block-buffered pipe**; prints lagged the actual progress | `print = functools.partial(print, flush=True)` + per-stage `[t]` timing in `dxf_3d.py`. |
+| 7 | Drawing **10× too big**, sprawled off the plate | The 3 DXF layers arrive at mismatched, huge coords (image/text ~1500mm via `canvas_cm*10`, Braille in px); assembler only **centered**, never scaled | `layout_content_on_base` now **scales to fit** the plate (margin) — and lays out **bands**. |
+| 8 | Layers **overlapped** in the center | No layout — all three centered on the same point | **Banded layout**: Hebrew text (top) / image (middle) / Braille (bottom), each fit to its band, 4 mm gaps. |
+| 9 | Braille dots **stretched** for short words | Dots came from blob-detecting a rendered PNG, then scaled to fill the band | Generate dots **programmatically from the Unicode Braille bits** at **fixed Grade-1 mm** (2.5 mm dot / 6 mm cell). Verified 2.50 mm regardless of word length; also drops the Braille-font dependency. |
+| 10 | Hebrew text **invisible / "split"** | `generate_hebrew_text_dxf` ran text through `image_to_dxf_exact`, which **skeletonizes** → thin broken stroke-skeletons | New `_filled_glyphs_to_dxf` (RETR_EXTERNAL) → **solid filled glyph outlines** extruded as solid letters. |
+| 11 | GPU couldn't speed up CadQuery | OCCT is a **CPU B-rep kernel** — no GPU backend; `@spaces.GPU` only attaches a GPU for the torch SD call | Confirmed CPU-only; CadQuery runs outside the GPU budget. Lever is solid-count / algorithm, not hardware. |
+
+### Features added the same session
+- **English support** — `language` param threaded frontend → `/api/generate` proxy → `/generate_page`
+  (5th input) → `generate_page_assets`. English = Grade-1 braille map, LTR `generate_text_dxf(rtl=False)`,
+  no nikud, no Hebrew→English translation.
+- **Full UI i18n** — `web/src/lib/i18n.jsx` (`LanguageProvider`/`useLang`, persisted, flips `<html dir>`),
+  `copy.js` → `{ hebrew, english }`, header `עב|EN` switcher, direction-aware arrows, localized a11y labels.
+- **Generation timer** — live per-page elapsed in `GenerateStep`.
+
+---
+
+## Geometry / engine reference (current `src/dxf_3d.py`)
+- **No boolean union** — features are independent solids in one `Compound`; the slicer fuses them.
+- **Flat tops** — taper disabled (segfault risk on glyphs).
+- **Bands** — `layout.text_frac` / `braille_frac` / `band_gap_mm`, `plate.content_margin_mm` (config.yaml).
+- **Braille** — fixed Grade-1 mm from Unicode bits (`image_funcs.generate_braille_dxf_from_text`).
+- **Text** — solid filled glyphs (`_filled_glyphs_to_dxf`), RTL reversed for Hebrew.
+- Typical page (~50 paths) ≈ seconds; pathological dense art (~560 paths) ≈ 60–80 s.
+
+## ⚠ Caveats / next refinements
+- **No rounded ridge tops** — flat (taper crashes OCCT). Re-add only via a crash-isolated subprocess.
+- **Braille spacing fixed; line-wrapping not handled** — a very long word overflows-then-shrinks; multi-line Braille not implemented.
+- **Glyph holes filled** — letters with counters (ם, ס, ק…) print solid (RETR_EXTERNAL). Fine for raised reading; open counters would need hole handling.
+- **Dense images slow** — solid-count scales with SD line complexity; no cap yet.
+- **i18n parity** — `copy.js` `hebrew`/`english` keys must stay in sync; no automated check yet.
+
+## Run / verify
 ```bash
-npm run dev --prefix web     # http://localhost:5173  (not running in a fresh session)
-npm run build --prefix web   # validate compile
-cd web && npm run lint
+cd web && npm run build && npm run lint     # frontend
+python src/dxf_3d.py --text t.dxf --braille b.dxf --image i.dxf -o page.stl   # engine CLI
+# deploy: backend first (hf_space push → HF), then frontend (web/ push → Vercel)
 ```

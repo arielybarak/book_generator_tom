@@ -71,17 +71,19 @@ curl -sf --max-time 60 "$ROOT/gradio_api/call/slow_ping/$EVENT" | tail -5
 
 **Only run this if $ARGUMENTS contains `--gpu`.**
 
-⚠ This calls `generate_page` and consumes ZeroGPU quota. Keep `duration=60` on the
-Space (`@spaces.GPU(duration=60)`); anonymous callers have a low cap and a higher
-duration breaks on the live site even if it works when tested authenticated.
+⚠ This calls `generate_page` via the **owner token** (`~/.hf_token`) — anonymous quota = 0,
+so an unauthenticated call fails immediately. Keep `duration=60` on the Space.
+For a richer probe with auto-log on failure, use `/gen-probe` instead.
 
 ```bash
 ROOT=https://mlightning-text2stl-engine-2-0-supermx-bottom.hf.space
+T=$(cat ~/.hf_token 2>/dev/null) || { echo "no ~/.hf_token — abort"; exit 1; }
 
 # Minimal valid inputs: one short Hebrew word, no variations, simple prompt
 EVENT=$(curl -sf -X POST "$ROOT/gradio_api/call/generate_page" \
   -H "Content-Type: application/json" \
-  -d '{"data":["שלום", {}, "a simple flower", "flower"]}' \
+  -H "Authorization: Bearer $T" \
+  -d '{"data":["שלום", {}, "a simple flower", "flower", "hebrew"]}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['event_id'])")
 echo "generate_page submitted — event_id: $EVENT"
 

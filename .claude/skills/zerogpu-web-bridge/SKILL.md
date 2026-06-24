@@ -62,3 +62,21 @@ Keep it tight: a 25-step SSD-1B run on the `zero-a10g` fits `duration=60` (→ ~
   the HTML shell where it expected JSON (Space asleep, or the route 404'd to the SPA).
 - **Read the actual error** with the `/hf-logs` command — Gradio hides tracebacks from clients
   (`data: null`); the Space's `logs/run` has the real Python stack.
+- **ZeroGPU cold start kills first-call model loads.** Every HF Space rebuild wipes the model
+  cache. `from_pretrained` inside a `@spaces.GPU` block fails when the 30 s GPU window expires
+  before the 8.9 GB download finishes. Fix: call `predownload_weights()` at **module load time**
+  (CPU, outside any `@spaces.GPU` decorator) so weights land in the HF cache before the first
+  GPU window opens. The GPU window then only needs to load from cache, not download.
+
+  ```python
+  # at module top — runs on Space startup, CPU, before any GPU window
+  def predownload_weights():
+      from diffusers import StableDiffusionPipeline
+      StableDiffusionPipeline.from_pretrained(MODEL_ID, torch_dtype=torch.float16)
+      # weights now cached; GPU window only loads from cache
+
+  predownload_weights()  # outside @spaces.GPU
+  ```
+
+  Without this, first post-deploy generation silently fails; second succeeds (cache warm). The
+  failure looks like an instant `event: error` with no traceback (GPU window expired before work).
