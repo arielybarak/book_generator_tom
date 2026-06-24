@@ -27,7 +27,8 @@ _pipe = None
 def _get_pipeline():
     global _pipe
     if _pipe is None:
-        model_id = cfg["stable_diffusion"]["model_id"]
+        sd_cfg = cfg["stable_diffusion"]
+        model_id = sd_cfg.get("image_model_id", sd_cfg["model_id"])
         dtype = torch.float16 if _device == "cuda" else torch.float32
         print(f"Loading Stable Diffusion ({model_id}) on {_device}...")
         _pipe = AutoPipelineForText2Image.from_pretrained(
@@ -38,30 +39,49 @@ def _get_pipeline():
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def create_images(hebrew_prompt, picture_type,
-                  image_output_location, text_output_location, braille_output_location):
+PRINT_FRIENDLY_STYLE = (
+    "simple line art, clean outline drawing, large shapes, thick contours, "
+    "very minimal detail, plain white background, high contrast, "
+    "easy to convert to 3D print"
+)
+
+PRINT_FRIENDLY_NEGATIVE = (
+    "shading, gradients, texture, hatching, crosshatching, "
+    "photorealistic, complex background, many small details, "
+    "thin lines, clutter, noise, realistic lighting, busy composition"
+)
+
+def build_print_friendly_prompt(image_desc: str, object_class: str | None = None) -> str:
+    subject = f"{object_class}, " if object_class else ""
+    return (
+        f"{subject}{image_desc}, {PRINT_FRIENDLY_STYLE}, "
+        "single subject, centered composition, children book outline style"
+    )
+
+def build_negative_prompt() -> str:
+    return PRINT_FRIENDLY_NEGATIVE
+
+def create_images(
+    raw_text,
+    variations,
+    image_desc,
+    object_class,
+    image_output_location, text_output_location, braille_output_location
+):
     """
     Full single-page pipeline (CLI / FlowManager use).
     Calls add_nikud() which uses interactive input() — not suitable for web context.
     """
     imf.ensure_font()
 
-    eng_desc  = lf.hebrew_translator(hebrew_prompt)
-    eng_class = lf.hebrew_translator(picture_type)
+    eng_desc  = lf.hebrew_translator(raw_text)
+    eng_class = lf.hebrew_translator(image_desc)
 
     sd_cfg = cfg["stable_diffusion"]
-    prompt = (
-        f"A single isolated {eng_desc} centered on a white background, "
-        f"classified as {eng_class}. "
-        "Simple child's drawing, 2D flat design, outlines only, single thin black pen, "
-        "minimalistic, continuous single pen draw, broad strokes, white background."
-    )
-    negative_prompt = (
-        "background, scenery, extra items, shading, shadows, gradients, "
-        "fine lines, intricate details, realistic texture, 3D, depth, broken lines."
-    )
+    prompt = build_print_friendly_prompt(eng_desc, eng_class or object_class)
+    negative_prompt = build_negative_prompt()
 
-    pipe  = _get_pipeline()
+    pipe = _get_pipeline()
     image = pipe(
         prompt=prompt,
         negative_prompt=negative_prompt,
@@ -70,7 +90,7 @@ def create_images(hebrew_prompt, picture_type,
     ).images[0]
 
     # Braille conversion (requires interactive nikud input)
-    hebrew_with_nikud = lf.add_nikud(hebrew_prompt)
+    hebrew_with_nikud = lf.add_nikud(raw_text)
     braille = lf.convert_to_braille(hebrew_with_nikud)
 
     # Image processing: edge detection → centering
