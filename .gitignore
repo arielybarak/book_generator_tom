@@ -21,3 +21,6 @@ braille_output_*/
 
 # VS Code
 .vscode/
+
+# JetBrains IDEs (PyCharm/WebStorm/IntelliJ) — per-developer editor settings
+.idea/

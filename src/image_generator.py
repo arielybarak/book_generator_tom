@@ -8,7 +8,11 @@ Responsibilities:
   Uses add_nikud() which calls input() — CLI-only, not suitable for web context.
 - images_to_dxf(): converts the three PNGs produced by create_images() to DXF files.
 
-Note: the web app (hf_space/gradio_app.py) has its own SD pipeline and does NOT use this module.
+Note: the deployed HF Space (hf_space/gradio_app_lithophane.py) has its own SD
+pipeline and does NOT import this module — only FlowManager/CLI does. Therefore
+editing THIS file does NOT require ./sync_to_space.sh or a Space redeploy; you can
+ignore the sync-guard reminder when only this file changed. (Any sync-guard nag
+is a false alarm here.)
 """
 import torch
 import cv2
