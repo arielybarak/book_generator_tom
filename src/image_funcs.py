@@ -55,73 +55,102 @@ def convert_tensor_to_pil_img(tensor):
 
 # ── Image → DXF ────────────────────────────────────────────────────────────────
 
-def image_to_dxf_exact(image_bw, out_path, canvas_cm=150):
+def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0):
     """
-    Convert a grayscale/binary numpy image to a DXF polyline file.
-    Uses Zhang-Suen skeletonization for single-pixel-wide lines and
-    approxPolyDP simplification for smaller, cleaner files.
+    Convert a grayscale/binary image OR image path to a smoother DXF polyline file.
+    Good for tactile / 3D-printable image outlines.
+
+    Main fixes:
+    - accepts path or numpy array
+    - smooths the binary mask before contour extraction
+    - avoids keeping every pixel stair-step
+    - exports closed continuous contours
     """
     canvas_mm = canvas_cm * 10.0
 
-    img = image_bw.copy()
+    # Accept either path or numpy array
+    if isinstance(image_bw, (str, os.PathLike)):
+        img = cv2.imread(str(image_bw), cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            raise RuntimeError(f"Could not load image: {image_bw}")
+    else:
+        img = image_bw.copy()
+        if img.ndim == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
     if img.dtype != np.uint8:
         img = img.astype(np.uint8)
 
-    # Normalise polarity: white lines on black background
+    # We want white object/lines on black background
     if np.mean(img) > 127:
         img = cv2.bitwise_not(img)
 
     _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
 
-    # Skeletonize to single-pixel-wide lines (requires opencv-contrib)
-    try:
-        edges = cv2.ximgproc.thinning(bin_img, thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
-    except AttributeError:
-        print("Warning: cv2.ximgproc not found — falling back to Canny (double lines).")
-        edges = cv2.Canny(bin_img, 50, 150)
+    # Smooth pixel staircase before contour extraction
+    # Upscaling gives the contour more room to become smooth.
+    upscale = 4
+    bin_img = cv2.resize(
+        bin_img,
+        None,
+        fx=upscale,
+        fy=upscale,
+        interpolation=cv2.INTER_CUBIC,
+    )
 
-    # Remove tiny noise specks
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(edges, connectivity=8)
-    clean = np.zeros_like(edges)
-    for i in range(1, num_labels):
-        if stats[i, cv2.CC_STAT_AREA] >= 15:
-            clean[labels == i] = 255
-    edges = clean
+    # Blur + threshold removes jagged pixel steps
+    bin_img = cv2.GaussianBlur(bin_img, (5, 5), 0)
+    _, bin_img = cv2.threshold(bin_img, 127, 255, cv2.THRESH_BINARY)
 
-    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    # Close tiny gaps and smooth corners
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, kernel, iterations=1)
+    bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    # Use TC89 instead of CHAIN_APPROX_NONE to avoid exporting every pixel step
+    contours, _ = cv2.findContours(
+        bin_img,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_TC89_KCOS,
+    )
+
+    contours = [c for c in contours if cv2.contourArea(c) >= 100 * upscale * upscale]
     if not contours:
-        print(f"Warning: no contours found for {out_path}")
+        print(f"Warning: no significant contours for {out_path}")
         return
 
-    y_coords, x_coords = np.nonzero(edges)
-    if len(x_coords) == 0:
-        return
+    all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
+    min_x, min_y = all_pts.min(axis=0)
+    max_x, max_y = all_pts.max(axis=0)
 
-    min_x, max_x = x_coords.min(), x_coords.max()
-    min_y, max_y = y_coords.min(), y_coords.max()
     w_px = max_x - min_x + 1
     h_px = max_y - min_y + 1
 
-    scale    = canvas_mm / max(w_px, h_px)
+    scale = canvas_mm / max(w_px, h_px)
     offset_x = (canvas_mm - w_px * scale) / 2
     offset_y = (canvas_mm - h_px * scale) / 2
 
     def px_to_mm(p):
-        return ((p[0] - min_x) * scale + offset_x,
-                (max_y - p[1]) * scale + offset_y)
+        return (
+            (p[0] - min_x) * scale + offset_x,
+            (max_y - p[1]) * scale + offset_y,
+        )
 
     doc = ezdxf.new(setup=True)
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
 
     for c in contours:
-        approx = cv2.approxPolyDP(c, epsilon=1.0, closed=True)
+        # epsilon is multiplied because we upscaled the image
+        epsilon = simplify_epsilon * upscale
+        approx = cv2.approxPolyDP(c, epsilon=epsilon, closed=True)
+
         pts = [px_to_mm(p[0]) for p in approx]
-        if len(pts) > 1:
-            msp.add_lwpolyline(pts, close=True)
+
+        if len(pts) > 2:
+            msp.add_lwpolyline(pts, close=True, dxfattribs={"color": 7})
 
     doc.saveas(out_path)
-
 
 def process_image_to_dxf(img_array, output_path, canvas_cm=150):
     """

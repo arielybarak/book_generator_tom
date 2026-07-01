@@ -44,15 +44,18 @@ def _get_pipeline():
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 PRINT_FRIENDLY_STYLE = (
-    "simple line art, clean outline drawing, large shapes, thick contours, "
-    "very minimal detail, plain white background, high contrast, "
-    "easy to convert to 3D print"
+    "icon, symbol, pictogram, single shape, basic geometric form, "
+    "child's drawing, crayon sketch, stick figure style, "
+    "ultra-minimal, flat solid shape, one color outline only, "
+    "no details, no texture, bold thick line, plain white background"
 )
 
 PRINT_FRIENDLY_NEGATIVE = (
-    "shading, gradients, texture, hatching, crosshatching, "
-    "photorealistic, complex background, many small details, "
-    "thin lines, clutter, noise, realistic lighting, busy composition"
+    "shading, gradients, texture, hatching, crosshatching, fill, solid color, "
+    "photorealistic, complex background, decorative, small details, "
+    "thin lines, clutter, noise, realistic lighting, busy composition, "
+    "interior detail, internal lines, patterns, perspective, 3D effect, "
+    "shadows, highlights, multiple objects"
 )
 
 def build_print_friendly_prompt(image_desc: str, object_class: str | None = None) -> str:
@@ -97,29 +100,44 @@ def create_images(
     hebrew_with_nikud = lf.add_nikud(raw_text)
     braille = lf.convert_to_braille(hebrew_with_nikud)
 
-    # Image processing: edge detection → centering
+    # Image processing: edge detection → simplification → centering
     img_np     = np.array(image)
     gray       = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
-    edges      = cv2.Canny(gray, 50, 200)
-    kernel     = np.ones((5, 5), np.uint8)
-    edges      = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
-    edges      = cv2.bitwise_not(edges)
-    h, w       = edges.shape
+    
+    # Use threshold instead of Canny for cleaner, bolder shapes
+    _, binary  = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+    
+    # Dilate to thicken lines to minimum printable width (~1.5-2mm)
+    kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    binary = cv2.dilate(binary, kernel_dilate, iterations=2)
+    
+    # Erode back slightly to clean up rough edges
+    kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    binary = cv2.erode(binary, kernel_erode, iterations=1)
+    
+    # Remove small noise specks (keep only major shapes)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    clean = np.zeros_like(binary)
+    for i in range(1, num_labels):
+        if stats[i, cv2.CC_STAT_AREA] >= 200:  # only keep large shapes
+            clean[labels == i] = 255
+    
+    edges = cv2.bitwise_not(clean)
+    h, w  = edges.shape
     edges[h-1:h, w-1:w] = 255
 
     ys, xs = np.where(edges[1:h-1, 1:w-1] == 0)
-    shift_x = int(w / 2 - xs.mean())
-    shift_y = int(h / 2 - ys.mean())
+    if len(xs) > 0:
+        shift_x = int(w / 2 - xs.mean())
+        shift_y = int(h / 2 - ys.mean())
+    else:
+        shift_x = shift_y = 0
     centered = cv2.warpAffine(
         edges, np.float32([[1, 0, shift_x], [0, 1, shift_y]]), (w, h), borderValue=255
     )
 
     # Save image PNG
-    plt.figure(figsize=(5, 5))
-    plt.imshow(centered, cmap="gray")
-    plt.axis("off")
-    plt.savefig(image_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
-    plt.close()
+    cv2.imwrite(str(image_output_location), centered)
 
     # Save Hebrew text PNG
     plt.figure(figsize=(5, 5))
