@@ -133,6 +133,94 @@ def run_sd_inference(prompt, negative_prompt, steps, guidance):
             guidance_scale=guidance,
         ).images[0]
 
+def make_simple_shape_image(*shape_names, size=512):
+    """
+    Create clean black-on-white geometric shapes as grayscale numpy images.
+    Returns None if the text is not a known simple shape.
+    """
+    words = []
+    for shape_name in shape_names:
+        if not shape_name:
+            continue
+        name = str(shape_name).strip().lower()
+        for ch in [".", ",", "!", "?", ":", ";", '"', "'", "״", "׳"]:
+            name = name.replace(ch, "")
+        words.append(name)
+
+    square_words = {"ריבוע", "רבוע", "מרובע", "square"}
+    circle_words = {"עיגול", "מעגל", "circle"}
+    triangle_words = {"משולש", "triangle"}
+    rectangle_words = {"מלבן", "rectangle"}
+
+    matched = None
+    for name in words:
+        if name in square_words:
+            matched = "square"
+            break
+        if name in circle_words:
+            matched = "circle"
+            break
+        if name in triangle_words:
+            matched = "triangle"
+            break
+        if name in rectangle_words:
+            matched = "rectangle"
+            break
+
+    if matched is None:
+        return None
+
+    img = np.full((size, size), 255, dtype=np.uint8)
+
+    thickness = 14
+    margin = int(size * 0.22)
+
+    if matched == "square":
+        cv2.rectangle(
+            img,
+            (margin, margin),
+            (size - margin, size - margin),
+            color=0,
+            thickness=thickness,
+            lineType=cv2.LINE_AA,
+        )
+
+    elif matched == "circle":
+        cv2.circle(
+            img,
+            (size // 2, size // 2),
+            int(size * 0.28),
+            color=0,
+            thickness=thickness,
+            lineType=cv2.LINE_AA,
+        )
+
+    elif matched == "triangle":
+        pts = np.array([
+            [size // 2, margin],
+            [size - margin, size - margin],
+            [margin, size - margin],
+        ], np.int32)
+        cv2.polylines(
+            img,
+            [pts],
+            isClosed=True,
+            color=0,
+            thickness=thickness,
+            lineType=cv2.LINE_AA,
+        )
+
+    elif matched == "rectangle":
+        cv2.rectangle(
+            img,
+            (int(size * 0.2), int(size * 0.32)),
+            (int(size * 0.8), int(size * 0.68)),
+            color=0,
+            thickness=thickness,
+            lineType=cv2.LINE_AA,
+        )
+
+    return img
 
 # ── Per-page generation ────────────────────────────────────────────────────────
 
@@ -180,42 +268,58 @@ def generate_page_assets(page_data, output_dir):
     )
 
     # Stable Diffusion line-art (GPU). Fall back to a blank canvas if unavailable.
+    # Image line-art.
+    # Simple geometric shapes are generated directly, without Stable Diffusion.
     gray = np.full((512, 512), 255, dtype=np.uint8)
-    try:
-        sd_cfg = cfg["stable_diffusion"]
-        image = run_sd_inference(
-            final_prompt, negative_prompt,
-            sd_cfg["inference_steps"], sd_cfg["guidance_scale"],
-        )
-        if image is not None:
-            image.save(img_path)
-            # Convert to grayscale, thicken lines, remove small details
-            gray = np.array(image.convert("L"))
-            
-            # Use threshold instead of skeletonization for bolder, simpler shapes
-            _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
-            
-            # Dilate to thicken lines
-            kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            binary = cv2.dilate(binary, kernel_dilate, iterations=2)
-            
-            # Erode slightly to clean up
-            kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-            binary = cv2.erode(binary, kernel_erode, iterations=1)
-            
-            # Remove small noise (keep only major shapes)
-            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-            clean = np.zeros_like(binary)
-            for i in range(1, num_labels):
-                if stats[i, cv2.CC_STAT_AREA] >= 200:
-                    clean[labels == i] = 255
-            
-            gray = cv2.bitwise_not(clean)
-            image_to_dxf_exact(gray, dxf_img_path, simplify_epsilon=3.5)
-        else:
-            print(f"Pipeline unavailable — skipping image for page {page_num}.")
-    except Exception as e:
-        print(f"Image generation failed for page {page_num}: {e}")
+
+    simple_shape = make_simple_shape_image(raw_text, desc, obj_class)
+
+    if simple_shape is not None:
+        gray = simple_shape
+        cv2.imwrite(img_path, gray)
+        image_to_dxf_exact(gray, dxf_img_path, simplify_epsilon=3.5)
+
+    else:
+        # Stable Diffusion line-art (GPU). Fall back to a blank canvas if unavailable.
+        try:
+            sd_cfg = cfg["stable_diffusion"]
+            image = run_sd_inference(
+                final_prompt, negative_prompt,
+                sd_cfg["inference_steps"], sd_cfg["guidance_scale"],
+            )
+
+            if image is not None:
+                image.save(img_path)
+
+                # Convert to grayscale, thicken lines, remove small details
+                gray = np.array(image.convert("L"))
+
+                # Use threshold instead of skeletonization for bolder, simpler shapes
+                _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+
+                # Dilate to thicken lines
+                kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                binary = cv2.dilate(binary, kernel_dilate, iterations=2)
+
+                # Erode slightly to clean up
+                kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+                binary = cv2.erode(binary, kernel_erode, iterations=1)
+
+                # Remove small noise (keep only major shapes)
+                num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+                clean = np.zeros_like(binary)
+                for i in range(1, num_labels):
+                    if stats[i, cv2.CC_STAT_AREA] >= 200:
+                        clean[labels == i] = 255
+
+                gray = cv2.bitwise_not(clean)
+                image_to_dxf_exact(gray, dxf_img_path, simplify_epsilon=3.5)
+
+            else:
+                print(f"Pipeline unavailable — skipping image for page {page_num}.")
+
+        except Exception as e:
+            print(f"Image generation failed for page {page_num}: {e}")
 
     generate_braille_dxf_from_text(braille_text, dxf_braille_path)
     generate_text_dxf(display_text, dxf_text_path, rtl=not is_english)
