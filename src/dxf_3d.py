@@ -505,43 +505,66 @@ def clipper_clean_and_simplify(poly: List[Point], clean_tol_mm: float) -> List[L
     simplified = pyclipper.SimplifyPolygon(cleaned, pyclipper.PFT_NONZERO)
     return [[(x / SCALE, y / SCALE) for x, y in p] for p in simplified]
 
-
 def stroke_polygons_from_centerline(points: List[Point], half_width: float, closed: bool) -> List[List[Point]]:
     """
     Offset a centerline to produce stroke footprint polygons.
 
-    Open paths → single ET_OPENROUND offset.
-    Closed paths → stroke each edge segment individually as OPEN to avoid
-    filled-band artefacts from ET_CLOSEDLINE.
+    Open paths:
+      stroked normally with ET_OPENROUND.
+
+    Closed paths:
+      stroked as ONE continuous closed line with ET_CLOSEDLINE.
+      This avoids gaps where a square can become only vertical bars in the STL.
     """
     if len(points) < 2:
         return []
+
     pts = clean_polyline_points(points, POINT_CLEAN_TOL)
     if len(pts) < 2:
         return []
 
     if closed:
+        # Do not split the polygon into individual edges.
+        # Stroke the entire closed contour continuously.
+        scaled = [(int(x * SCALE), int(y * SCALE)) for x, y in pts]
+
+        pco = pyclipper.PyclipperOffset()
+        pco.AddPath(scaled, pyclipper.JT_ROUND, pyclipper.ET_CLOSEDLINE)
+        outs = pco.Execute(half_width * SCALE)
+
+        if outs:
+            return [[(x / SCALE, y / SCALE) for x, y in poly] for poly in outs]
+
+        # Fallback: old edge-by-edge behavior only if ET_CLOSEDLINE fails.
         out: List[List[Point]] = []
         n = len(pts)
+
         for i in range(n):
             p1, p2 = pts[i], pts[(i + 1) % n]
             if p1 == p2:
                 continue
-            scaled = [(int(p1[0] * SCALE), int(p1[1] * SCALE)),
-                      (int(p2[0] * SCALE), int(p2[1] * SCALE))]
+
+            scaled_edge = [
+                (int(p1[0] * SCALE), int(p1[1] * SCALE)),
+                (int(p2[0] * SCALE), int(p2[1] * SCALE)),
+            ]
+
             pco = pyclipper.PyclipperOffset()
-            pco.AddPath(scaled, pyclipper.JT_ROUND, pyclipper.ET_OPENROUND)
-            outs = pco.Execute(half_width * SCALE)
-            if outs:
-                out.extend([[(x / SCALE, y / SCALE) for x, y in poly] for poly in outs])
+            pco.AddPath(scaled_edge, pyclipper.JT_ROUND, pyclipper.ET_OPENROUND)
+            edge_outs = pco.Execute(half_width * SCALE)
+
+            if edge_outs:
+                out.extend([[(x / SCALE, y / SCALE) for x, y in poly] for poly in edge_outs])
+
         return out
 
     scaled = [(int(x * SCALE), int(y * SCALE)) for x, y in pts]
+
     pco = pyclipper.PyclipperOffset()
     pco.AddPath(scaled, pyclipper.JT_ROUND, pyclipper.ET_OPENROUND)
     outs = pco.Execute(half_width * SCALE)
-    return [[(x / SCALE, y / SCALE) for x, y in poly] for poly in outs] if outs else []
 
+    return [[(x / SCALE, y / SCALE) for x, y in poly] for poly in outs] if outs else []
 
 def _extrude_one_centerline(
     solids: List,

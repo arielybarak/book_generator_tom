@@ -228,15 +228,10 @@ def add_polyline(msp, pts, closed=True):
     if len(clean_pts) >= 2:
         msp.add_lwpolyline(clean_pts, close=closed, dxfattribs={"color": 7})
 
-
 def create_basic_shape_dxf(shape_kind, dxf_path, canvas_cm=150):
     """
-    Writes a clean DXF for basic shapes as OPEN continuous centerlines.
-
-    Important:
-    We intentionally do NOT use closed=True here.
-    dxf_3d.py handles closed image paths edge-by-edge, which can create gaps
-    or missing sides in the STL. Open continuous paths are stroked as one path.
+    Writes a clean closed DXF for basic shapes.
+    Closed paths are handled continuously in dxf_3d.py.
     """
     canvas_mm = canvas_cm * 10.0
 
@@ -248,13 +243,10 @@ def create_basic_shape_dxf(shape_kind, dxf_path, canvas_cm=150):
     cx = canvas_mm / 2.0
     cy = canvas_mm / 2.0
 
-    def add_open_path(points):
-        # close=False on purpose.
-        # We repeat the first point at the end so the visual shape is closed,
-        # but the DXF entity is still an open path for the STL builder.
+    def add_closed_path(points):
         msp.add_lwpolyline(
             [(float(x), float(y)) for x, y in points],
-            close=False,
+            close=True,
             dxfattribs={"color": 7},
         )
 
@@ -264,9 +256,8 @@ def create_basic_shape_dxf(shape_kind, dxf_path, canvas_cm=150):
             (canvas_mm - margin, margin),
             (canvas_mm - margin, canvas_mm - margin),
             (margin, canvas_mm - margin),
-            (margin, margin),
         ]
-        add_open_path(pts)
+        add_closed_path(pts)
 
     elif shape_kind == "rectangle":
         x1 = canvas_mm * 0.2
@@ -279,37 +270,34 @@ def create_basic_shape_dxf(shape_kind, dxf_path, canvas_cm=150):
             (x2, y1),
             (x2, y2),
             (x1, y2),
-            (x1, y1),
         ]
-        add_open_path(pts)
+        add_closed_path(pts)
 
     elif shape_kind == "triangle":
         pts = [
             (cx, canvas_mm - margin),
             (canvas_mm - margin, margin),
             (margin, margin),
-            (cx, canvas_mm - margin),
         ]
-        add_open_path(pts)
+        add_closed_path(pts)
 
     elif shape_kind == "circle":
         radius = canvas_mm * 0.28
         n = 160
         pts = []
 
-        for i in range(n + 1):
+        for i in range(n):
             theta = 2.0 * math.pi * i / n
             x = cx + radius * math.cos(theta)
             y = cy + radius * math.sin(theta)
             pts.append((x, y))
 
-        add_open_path(pts)
+        add_closed_path(pts)
 
     else:
         raise ValueError(f"Unsupported basic shape: {shape_kind}")
 
     doc.saveas(dxf_path)
-
 # ── Stable Diffusion image post-processing ─────────────────────────────────────
 
 def sd_image_to_clean_line_art(image, img_path, dxf_img_path):
