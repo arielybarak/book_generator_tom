@@ -136,36 +136,45 @@ def run_sd_inference(prompt, negative_prompt, steps, guidance):
 def make_simple_shape_image(*shape_names, size=512):
     """
     Create clean black-on-white geometric shapes as grayscale numpy images.
-    Returns None if the text is not a known simple shape.
+    Detects simple shapes even inside sentences like 'צייר ריבוע'.
     """
-    words = []
-    for shape_name in shape_names:
-        if not shape_name:
-            continue
-        name = str(shape_name).strip().lower()
-        for ch in [".", ",", "!", "?", ":", ";", '"', "'", "״", "׳"]:
-            name = name.replace(ch, "")
-        words.append(name)
+    import unicodedata
 
-    square_words = {"ריבוע", "רבוע", "מרובע", "square"}
-    circle_words = {"עיגול", "מעגל", "circle"}
-    triangle_words = {"משולש", "triangle"}
-    rectangle_words = {"מלבן", "rectangle"}
+    def normalize_text(text):
+        if not text:
+            return ""
+
+        text = str(text).strip().lower()
+
+        # remove Hebrew nikud / diacritics
+        text = "".join(
+            ch for ch in unicodedata.normalize("NFKD", text)
+            if not unicodedata.combining(ch)
+        )
+
+        # remove punctuation / invisible RTL-ish punctuation
+        for ch in [".", ",", "!", "?", ":", ";", '"', "'", "״", "׳", "\u200f", "\u200e"]:
+            text = text.replace(ch, " ")
+
+        return " ".join(text.split())
+
+    combined = " ".join(normalize_text(x) for x in shape_names if x)
+
+    square_words = ["ריבוע", "רבוע", "מרובע", "square"]
+    circle_words = ["עיגול", "מעגל", "circle"]
+    triangle_words = ["משולש", "triangle"]
+    rectangle_words = ["מלבן", "rectangle"]
 
     matched = None
-    for name in words:
-        if name in square_words:
-            matched = "square"
-            break
-        if name in circle_words:
-            matched = "circle"
-            break
-        if name in triangle_words:
-            matched = "triangle"
-            break
-        if name in rectangle_words:
-            matched = "rectangle"
-            break
+
+    if any(word in combined for word in square_words):
+        matched = "square"
+    elif any(word in combined for word in circle_words):
+        matched = "circle"
+    elif any(word in combined for word in triangle_words):
+        matched = "triangle"
+    elif any(word in combined for word in rectangle_words):
+        matched = "rectangle"
 
     if matched is None:
         return None
@@ -201,6 +210,7 @@ def make_simple_shape_image(*shape_names, size=512):
             [size - margin, size - margin],
             [margin, size - margin],
         ], np.int32)
+
         cv2.polylines(
             img,
             [pts],
@@ -272,7 +282,7 @@ def generate_page_assets(page_data, output_dir):
     # Simple geometric shapes are generated directly, without Stable Diffusion.
     gray = np.full((512, 512), 255, dtype=np.uint8)
 
-    simple_shape = make_simple_shape_image(raw_text, desc, obj_class)
+    simple_shape = make_simple_shape_image(raw_text, display_text, desc, obj_class, eng_desc, eng_class)
 
     if simple_shape is not None:
         gray = simple_shape
