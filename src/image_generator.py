@@ -73,6 +73,9 @@ def make_simple_shape_image(shape_name, size=1024):
     Create clean black-on-white geometric shapes.
     Returns numpy grayscale image.
     """
+    if not shape_name:
+        return None
+
     img = np.full((size, size), 255, dtype=np.uint8)
 
     name = shape_name.strip().lower()
@@ -134,6 +137,44 @@ def make_simple_shape_image(shape_name, size=1024):
         return img
 
     return None
+def process_sd_image_to_centered(image):
+    img_np = np.array(image)
+    gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
+
+    _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+
+    kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    binary = cv2.dilate(binary, kernel_dilate, iterations=2)
+
+    kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    binary = cv2.erode(binary, kernel_erode, iterations=1)
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    clean = np.zeros_like(binary)
+
+    for i in range(1, num_labels):
+        if stats[i, cv2.CC_STAT_AREA] >= 200:
+            clean[labels == i] = 255
+
+    edges = cv2.bitwise_not(clean)
+    h, w = edges.shape
+    edges[h - 1:h, w - 1:w] = 255
+
+    ys, xs = np.where(edges[1:h - 1, 1:w - 1] == 0)
+    if len(xs) > 0:
+        shift_x = int(w / 2 - xs.mean())
+        shift_y = int(h / 2 - ys.mean())
+    else:
+        shift_x = shift_y = 0
+
+    centered = cv2.warpAffine(
+        edges,
+        np.float32([[1, 0, shift_x], [0, 1, shift_y]]),
+        (w, h),
+        borderValue=255,
+    )
+
+    return centered
 
 def create_images(
     raw_text,
@@ -176,81 +217,11 @@ def create_images(
             guidance_scale=sd_cfg["guidance_scale"],
         ).images[0]
 
-        img_np = np.array(image)
-        gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
-
-        _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
-
-        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        binary = cv2.dilate(binary, kernel_dilate, iterations=2)
-
-        kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        binary = cv2.erode(binary, kernel_erode, iterations=1)
-
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-        clean = np.zeros_like(binary)
-
-        for i in range(1, num_labels):
-            if stats[i, cv2.CC_STAT_AREA] >= 200:
-                clean[labels == i] = 255
-
-        edges = cv2.bitwise_not(clean)
-        h, w = edges.shape
-        edges[h - 1:h, w - 1:w] = 255
-
-        ys, xs = np.where(edges[1:h - 1, 1:w - 1] == 0)
-        if len(xs) > 0:
-            shift_x = int(w / 2 - xs.mean())
-            shift_y = int(h / 2 - ys.mean())
-        else:
-            shift_x = shift_y = 0
-
-        centered = cv2.warpAffine(
-            edges,
-            np.float32([[1, 0, shift_x], [0, 1, shift_y]]),
-            (w, h),
-            borderValue=255,
-        )
+        centered = process_sd_image_to_centered(image)
 
     # Braille conversion (requires interactive nikud input)
     hebrew_with_nikud = lf.add_nikud(raw_text)
     braille = lf.convert_to_braille(hebrew_with_nikud)
-
-    # Image processing: edge detection → simplification → centering
-    img_np     = np.array(image)
-    gray       = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
-    
-    # Use threshold instead of Canny for cleaner, bolder shapes
-    _, binary  = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
-    
-    # Dilate to thicken lines to minimum printable width (~1.5-2mm)
-    kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    binary = cv2.dilate(binary, kernel_dilate, iterations=2)
-    
-    # Erode back slightly to clean up rough edges
-    kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    binary = cv2.erode(binary, kernel_erode, iterations=1)
-    
-    # Remove small noise specks (keep only major shapes)
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-    clean = np.zeros_like(binary)
-    for i in range(1, num_labels):
-        if stats[i, cv2.CC_STAT_AREA] >= 200:  # only keep large shapes
-            clean[labels == i] = 255
-    
-    edges = cv2.bitwise_not(clean)
-    h, w  = edges.shape
-    edges[h-1:h, w-1:w] = 255
-
-    ys, xs = np.where(edges[1:h-1, 1:w-1] == 0)
-    if len(xs) > 0:
-        shift_x = int(w / 2 - xs.mean())
-        shift_y = int(h / 2 - ys.mean())
-    else:
-        shift_x = shift_y = 0
-    centered = cv2.warpAffine(
-        edges, np.float32([[1, 0, shift_x], [0, 1, shift_y]]), (w, h), borderValue=255
-    )
 
     # Save image PNG
     cv2.imwrite(str(image_output_location), centered)
