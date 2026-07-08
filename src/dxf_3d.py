@@ -71,6 +71,7 @@ IMAGE_OUTLINE_WIDTH   = _t["image_outline_width_mm"]
 IMAGE_DETAIL_HEIGHT   = _t["image_detail_height_mm"]
 IMAGE_DETAIL_WIDTH    = _t["image_detail_width_mm"]
 OUTLINE_MIN_AREA      = _t["outline_min_closed_area_mm2"]
+FILL_HEIGHT           = _t["fill_height_mm"]
 
 TEXT_SOLID_HEIGHT     = _t["text_height_mm"]
 
@@ -626,6 +627,56 @@ def extrude_image_strokes(
     return solids
 
 
+def fill_closed_regions(
+    closed_paths: List[List[Point]],
+    fill_height: float = FILL_HEIGHT,
+) -> List:
+    """
+    Extrude the interior of large closed image paths as a flat raised solid.
+
+    Produces a three-level tactile hierarchy the finger can read:
+        base plate → filled body (fill_height) → outline ridge on top
+
+    The fill height must be less than image_outline_height_mm so the outline
+    ridge stands proud above the body. Only paths with area ≥ OUTLINE_MIN_AREA
+    are filled; small closed paths (eyes, nostrils) are stroked only.
+
+    pyclipper CleanPolygon + SimplifyPolygon handle self-intersecting or
+    degenerate contours from rasterised art before the CadQuery extrude.
+    """
+    if fill_height <= 0:
+        return []
+
+    solids: List = []
+    count = 0
+    for pts in closed_paths:
+        if abs(polygon_area(pts)) < OUTLINE_MIN_AREA:
+            continue
+        pts = clean_polyline_points(pts, POINT_CLEAN_TOL)
+        if len(pts) < 3:
+            continue
+        if polygon_area(pts) < 0:
+            pts = list(reversed(pts))
+        for p2 in clipper_clean_and_simplify(pts, CLIPPER_CLEAN_TOL):
+            p2 = clean_polyline_points(p2, POINT_CLEAN_TOL)
+            if len(p2) < 3:
+                continue
+            if polygon_area(p2) < 0:
+                p2 = list(reversed(p2))
+            try:
+                solid = (cq.Workplane("XY")
+                         .workplane(offset=BASE_THICKNESS)
+                         .polyline(p2).close()
+                         .extrude(fill_height))
+                solids.append(solid.val())
+                count += 1
+            except Exception as e:
+                print(f"    Warning: fill region skipped: {e}")
+
+    print(f"  Fill regions: {count} interiors at {fill_height:.1f}mm")
+    return solids
+
+
 # =========================
 # Texture fills
 # =========================
@@ -809,6 +860,10 @@ def create_one_page_stl_from_dxf(
         print(f"    [t] braille {time.time() - t0:.1f}s")
 
     if image_dxf and (image_closed or image_open or image_circles):
+        if image_closed:
+            t0 = time.time()
+            parts += fill_closed_regions(image_closed)
+            print(f"    [t] fill regions {time.time() - t0:.1f}s")
         t0 = time.time()
         parts += extrude_image_strokes(
             image_closed, image_open, image_circles,

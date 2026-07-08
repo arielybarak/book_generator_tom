@@ -23,7 +23,8 @@ tactile:
 
   # Height hierarchy — taller = more prominent to touch
   image_outline_height_mm: 1.2   # main contours (tallest — primary shapes to trace)
-  image_detail_height_mm: 0.7    # inner / secondary lines
+  fill_height_mm: 1.0            # solid interior fill — sits below the outline ridge
+  image_detail_height_mm: 0.8    # inner / secondary lines (eyes, nostrils, etc.)
   text_height_mm: 1.0            # raised Hebrew text (sighted adult reads aloud)
   braille_dot_height_mm: 0.6     # Braille dome height above base
   braille_dot_radius_mm: 0.75    # standard Grade 1 Braille dot radius
