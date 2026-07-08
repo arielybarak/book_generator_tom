@@ -51,7 +51,7 @@ tactile:
   texture_medium_region_min_area_mm2: 80.0   # crosshatch
   texture_ridge_spacing_mm: 1.5
   texture_ridge_width_mm: 0.5
-  texture_height_mm: 0.3             # lower than outline — subtle fill
+  texture_height_mm: 0.35             # lower than outline — subtle fill
 
 # Stable Diffusion image generation
 stable_diffusion:
