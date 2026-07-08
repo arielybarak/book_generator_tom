@@ -68,114 +68,6 @@ def build_print_friendly_prompt(image_desc: str, object_class: str | None = None
 def build_negative_prompt() -> str:
     return PRINT_FRIENDLY_NEGATIVE
 
-def make_simple_shape_image(shape_name, size=1024):
-    """
-    Create clean black-on-white geometric shapes.
-    Returns numpy grayscale image.
-    """
-    if not shape_name:
-        return None
-
-    img = np.full((size, size), 255, dtype=np.uint8)
-
-    name = shape_name.strip().lower()
-
-    # Hebrew + English aliases
-    square_words = {"ריבוע", "מרובע", "square"}
-    circle_words = {"עיגול", "מעגל", "circle"}
-    triangle_words = {"משולש", "triangle"}
-    rectangle_words = {"מלבן", "rectangle"}
-
-    thickness = 18
-    margin = int(size * 0.25)
-
-    if name in square_words:
-        cv2.rectangle(
-            img,
-            (margin, margin),
-            (size - margin, size - margin),
-            color=0,
-            thickness=thickness,
-        )
-        return img
-
-    if name in circle_words:
-        cv2.circle(
-            img,
-            (size // 2, size // 2),
-            int(size * 0.28),
-            color=0,
-            thickness=thickness,
-        )
-        return img
-
-    if name in triangle_words:
-        pts = np.array([
-            [size // 2, margin],
-            [size - margin, size - margin],
-            [margin, size - margin],
-        ], np.int32)
-
-        cv2.polylines(
-            img,
-            [pts],
-            isClosed=True,
-            color=0,
-            thickness=thickness,
-            lineType=cv2.LINE_AA,
-        )
-        return img
-
-    if name in rectangle_words:
-        cv2.rectangle(
-            img,
-            (int(size * 0.2), int(size * 0.32)),
-            (int(size * 0.8), int(size * 0.68)),
-            color=0,
-            thickness=thickness,
-        )
-        return img
-
-    return None
-def process_sd_image_to_centered(image):
-    img_np = np.array(image)
-    gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
-
-    _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
-
-    kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    binary = cv2.dilate(binary, kernel_dilate, iterations=2)
-
-    kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    binary = cv2.erode(binary, kernel_erode, iterations=1)
-
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-    clean = np.zeros_like(binary)
-
-    for i in range(1, num_labels):
-        if stats[i, cv2.CC_STAT_AREA] >= 200:
-            clean[labels == i] = 255
-
-    edges = cv2.bitwise_not(clean)
-    h, w = edges.shape
-    edges[h - 1:h, w - 1:w] = 255
-
-    ys, xs = np.where(edges[1:h - 1, 1:w - 1] == 0)
-    if len(xs) > 0:
-        shift_x = int(w / 2 - xs.mean())
-        shift_y = int(h / 2 - ys.mean())
-    else:
-        shift_x = shift_y = 0
-
-    centered = cv2.warpAffine(
-        edges,
-        np.float32([[1, 0, shift_x], [0, 1, shift_y]]),
-        (w, h),
-        borderValue=255,
-    )
-
-    return centered
-
 def create_images(
     raw_text,
     variations,
@@ -189,39 +81,60 @@ def create_images(
     """
     imf.ensure_font()
 
-    eng_desc = lf.hebrew_translator(raw_text)
+    eng_desc  = lf.hebrew_translator(raw_text)
     eng_class = lf.hebrew_translator(image_desc)
 
-    # For simple geometric shapes, do NOT use Stable Diffusion.
-    # Generate clean deterministic geometry instead.
-    simple_shape = make_simple_shape_image(raw_text)
+    sd_cfg = cfg["stable_diffusion"]
+    prompt = build_print_friendly_prompt(eng_desc, eng_class or object_class)
+    negative_prompt = build_negative_prompt()
 
-    if simple_shape is None and image_desc:
-        simple_shape = make_simple_shape_image(image_desc)
-
-    if simple_shape is None and object_class:
-        simple_shape = make_simple_shape_image(object_class)
-
-    if simple_shape is not None:
-        centered = simple_shape
-    else:
-        sd_cfg = cfg["stable_diffusion"]
-        prompt = build_print_friendly_prompt(eng_desc, eng_class or object_class)
-        negative_prompt = build_negative_prompt()
-
-        pipe = _get_pipeline()
-        image = pipe(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            num_inference_steps=sd_cfg["inference_steps"],
-            guidance_scale=sd_cfg["guidance_scale"],
-        ).images[0]
-
-        centered = process_sd_image_to_centered(image)
+    pipe = _get_pipeline()
+    image = pipe(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        num_inference_steps=sd_cfg["inference_steps"],
+        guidance_scale=sd_cfg["guidance_scale"],
+    ).images[0]
 
     # Braille conversion (requires interactive nikud input)
     hebrew_with_nikud = lf.add_nikud(raw_text)
     braille = lf.convert_to_braille(hebrew_with_nikud)
+
+    # Image processing: edge detection → simplification → centering
+    img_np     = np.array(image)
+    gray       = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
+    
+    # Use threshold instead of Canny for cleaner, bolder shapes
+    _, binary  = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+    
+    # Dilate to thicken lines to minimum printable width (~1.5-2mm)
+    kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    binary = cv2.dilate(binary, kernel_dilate, iterations=2)
+    
+    # Erode back slightly to clean up rough edges
+    kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    binary = cv2.erode(binary, kernel_erode, iterations=1)
+    
+    # Remove small noise specks (keep only major shapes)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    clean = np.zeros_like(binary)
+    for i in range(1, num_labels):
+        if stats[i, cv2.CC_STAT_AREA] >= 200:  # only keep large shapes
+            clean[labels == i] = 255
+    
+    edges = cv2.bitwise_not(clean)
+    h, w  = edges.shape
+    edges[h-1:h, w-1:w] = 255
+
+    ys, xs = np.where(edges[1:h-1, 1:w-1] == 0)
+    if len(xs) > 0:
+        shift_x = int(w / 2 - xs.mean())
+        shift_y = int(h / 2 - ys.mean())
+    else:
+        shift_x = shift_y = 0
+    centered = cv2.warpAffine(
+        edges, np.float32([[1, 0, shift_x], [0, 1, shift_y]]), (w, h), borderValue=255
+    )
 
     # Save image PNG
     cv2.imwrite(str(image_output_location), centered)

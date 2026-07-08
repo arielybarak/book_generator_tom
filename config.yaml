@@ -7,7 +7,7 @@
 plate:
   width_mm: 150.0
   height_mm: 150.0
-  thickness_mm: 0.4           # thin backing — tactile features sit on top
+  thickness_mm: 1.0           # thin backing — tactile features sit on top
   corner_radius_mm: 10.0
   content_margin_mm: 10.0     # clear border around all content
 
@@ -22,7 +22,7 @@ layout:
 tactile:
 
   # Height hierarchy — taller = more prominent to touch
-  image_outline_height_mm: 1.8      # main contours (tallest — primary shapes to trace)
+  image_outline_height_mm: 2.2      # main contours (tallest — primary shapes to trace)
   image_detail_height_mm: 0.0       # DISABLED — no inner details for ultra-simple shapes
   text_height_mm: 1.0               # raised Hebrew text (sighted adult reads aloud)
   braille_dot_height_mm: 0.6        # Braille dome height above base
@@ -46,7 +46,7 @@ tactile:
   path_simplification_tolerance_mm: 0.5
 
   # Texture fill inside large closed regions
-  texture_enabled: false             # DISABLED for ultra-simple shapes
+  texture_enabled: true             # DISABLED for ultra-simple shapes
   texture_large_region_min_area_mm2: 300.0   # parallel ridges
   texture_medium_region_min_area_mm2: 80.0   # crosshatch
   texture_ridge_spacing_mm: 1.5
@@ -73,7 +73,7 @@ geometry:
 
 # Optional mounting holes (disabled by default)
 mounting_holes:
-  enabled: false
+  enabled: true
   radius_mm: 2.0
   count: 3
   margin_right_mm: 7.0
