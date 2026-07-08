@@ -27,6 +27,7 @@ except ImportError:
 
 import gradio as gr
 import os
+import re
 import time
 import cv2
 import torch
@@ -329,6 +330,15 @@ def sd_image_to_clean_line_art(image, img_path, dxf_img_path):
 
 # ── Per-page generation ────────────────────────────────────────────────────────
 
+def _safe_slug(text, max_len=24):
+    """Filesystem-safe slug from page text: strip nikud, first 3 words,
+    keep letters/digits/_/- (\\w is unicode-aware -> Hebrew kept)."""
+    text = re.sub(r'[֑-ׇ]', '', text or '')
+    slug = '_'.join(text.split()[:3])
+    slug = re.sub(r'[^\w-]', '', slug)
+    return slug[:max_len].strip('_')
+
+
 def generate_page_assets(page_data, output_dir):
     page_num = page_data["page_number"]
     raw_text = page_data["raw_text"]
@@ -341,7 +351,8 @@ def generate_page_assets(page_data, output_dir):
     display_text = raw_text if is_english else apply_variations(raw_text, variations)
     braille_text = text_to_braille(display_text, language)
 
-    base_name = f"page_{page_num}"
+    slug = _safe_slug(raw_text)
+    base_name = f"page_{page_num}_{slug}" if slug else f"page_{page_num}"
     img_path = os.path.join(output_dir, f"{base_name}.png")
     dxf_img_path = os.path.join(output_dir, f"{base_name}_image.dxf")
     dxf_braille_path = os.path.join(output_dir, f"{base_name}_braille.dxf")
