@@ -41,13 +41,76 @@ flowchart TD
     STL --> BRL["⠃  Braille domes\nHemisphere bumps — child reads independently"]
 ```
 
+### STL engine
+
+The deployed engine (and the only one in active use) is **`src/dxf_3d.py`** — it turns the
+3 DXFs into true 3D solids via CadQuery + pyclipper: filled-glyph text extrusions, Braille
+hemisphere domes, and dome-profile image ridges, laid out as independent solids in three
+non-overlapping bands (no boolean union — the slicer fuses overlaps at print time; booleans
+on real Hebrew glyph counts were catastrophically slow and could segfault OCCT).
+
+`src/lithophane.py` (grayscale-heightmap → mesh, CadQuery-free) is an earlier alternate
+approach kept in the tree for reference; it is **not used in production** despite the
+`gradio_app_lithophane.py` filename in `hf_space/` — that file was renamed at a different
+point in the project's history and now runs the CadQuery engine too. Don't take the filename
+as a guide to which engine is live; see `PROGRESS.md` for the full migration history.
+
 ---
 
 ## Deployment
 
-The backend is deployed on **Hugging Face Spaces** (GPU-accelerated). `app/app.py` is the Gradio web app that runs there. A dedicated frontend is planned.
+### Backend — Hugging Face Spaces
 
-> **HF Spaces note:** Spaces expects `app.py` at the repo root. Copy or symlink `app/app.py` to the root, or set the Space entry point in the Space settings.
+The backend runs on **Hugging Face Spaces** (GPU via ZeroGPU). The Space is its own git repo, included here as the **`hf_space/` submodule**. `hf_space/gradio_app_lithophane.py` is the deployed entry point (see "STL engine" above for why the name is misleading); it is self-contained (bundles its own `src/`, `config.yaml`, `requirements.txt`).
+
+> **Editing the Space:** edit inside `hf_space/`, then `git commit` + `git push` from that folder — HF auto-rebuilds on push. The repo-root `src/` is kept for the notebooks and CLI/FlowManager; run `./sync_to_space.sh` to mirror changes into `hf_space/`.
+
+### Frontend — React web app
+
+A public-facing bilingual (Hebrew/English) website lives in `web/` — React 19 + Vite + Tailwind v4, deployed to **Vercel**. Parents and teachers use it; no technical background assumed.
+
+```bash
+cd web && npm install && npm run dev   # http://localhost:5173
+```
+
+Set `VITE_HF_SPACE` (and the Supabase vars below) before running — see `web/.env.example`.
+
+### Auth & the generate proxy — Supabase + Vercel serverless function
+
+Generation requires a signed-in user (username/password via **Supabase Auth**). The browser
+never talks to the HF Space directly to *start* a job — it calls a same-origin Vercel
+serverless function, `web/api/generate.js`, which:
+
+1. Validates the caller's Supabase session JWT (the real auth gate).
+2. Enqueues the job on the HF Space using a **server-side HF token**, so generation runs on
+   the project owner's PRO ZeroGPU quota instead of the tiny anonymous quota.
+3. Returns an `event_id`; the browser then streams the result itself directly from the HF
+   Space (that `GET` needs no auth) via Server-Sent Events.
+
+#### `/generate_page` API contract (on the HF Space)
+
+| | |
+|---|---|
+| **Inputs** | `raw_text`, `variations` (nikud choices JSON), `image_desc`, `object_class`, `language` (`"hebrew"` \| `"english"`) |
+| **Outputs** | `image` (PNG file URL), `stl` (STL file URL) |
+
+Client-side call sites: `web/src/api/hfClient.js` (wake-up + SSE streaming) and
+`web/api/generate.js` (authenticated enqueue). Full contract details in
+`.claude/skills/web-backend-contract` and `.claude/skills/zerogpu-web-bridge`.
+
+Deploy frontend: connect `web/` to a Vercel project (Root Directory = `web`), set the env
+vars above plus `HF_TOKEN` + `SUPABASE_URL` / `SUPABASE_ANON_KEY` (server-side, no `VITE_`
+prefix), auto-deploys on `git push`.
+
+### Forking this project / standing up your own copy
+
+TOM's production stack spans three free-tier cloud platforms — **Hugging Face Spaces**
+(ZeroGPU backend), **Vercel** (frontend + auth-proxy), **Supabase** (auth). If you're a
+student or new contributor forking this repo, **[`GETTING_STARTED.md`](GETTING_STARTED.md)**
+walks through what each platform does here and how to point your own fork at your own
+accounts, from scratch. `pip install -r hf_space/requirements.txt` + `python
+gradio_app_lithophane.py` above is enough to run the pipeline locally without touching any
+of the three.
 
 ---
 
@@ -55,17 +118,35 @@ The backend is deployed on **Hugging Face Spaces** (GPU-accelerated). `app/app.p
 
 ```
 book_generator_tom/
-├── src/                      # Reusable library modules
+├── src/                      # Library modules — used by the notebooks & CLI/FlowManager
 │   ├── language_funcs.py     # Hebrew ↔ Braille, translation, nikud disambiguation
 │   ├── image_funcs.py        # Image processing, PNG → DXF, font setup
 │   ├── image_generator.py    # Stable Diffusion pipeline wrapper
-│   ├── dxf_3d.py             # 3 DXF files → single STL (CadQuery + pyclipper)
+│   ├── dxf_3d.py             # STL engine — 3 DXF files → solid STL (CadQuery + pyclipper), deployed
+│   ├── lithophane.py         # Legacy heightmap engine — kept for reference, unused in prod
 │   ├── flow_manager.py       # Multi-page book orchestrator (CLI use)
 │   └── config.py             # Loads config.yaml and exposes `cfg` dict
-├── app/
-│   └── app.py                # Gradio web app — primary entry point
+├── web/                      # React frontend (React 19 + Vite + Tailwind v4) → Vercel
+│   ├── src/
+│   │   ├── App.jsx           # 4-step flow: Landing → BookBuilder → Generate → Download
+│   │   ├── api/hfClient.js   # Wake-up + 2-step REST/SSE client → Vercel proxy → HF Space
+│   │   ├── components/       # Stepper, NikudChooser, StlViewer, GenerateStep, …
+│   │   ├── lib/copy.js       # All UI strings, `{ hebrew, english }`
+│   │   ├── lib/i18n.jsx      # Language context (`LanguageProvider`/`useLang`), flips `<html dir>`
+│   │   ├── lib/nikud.js      # Nikud choices — must mirror SPECIAL_REPLACEMENTS in src/
+│   │   ├── lib/supabase.js   # Supabase client (auth)
+│   │   └── lib/auth.jsx      # Auth context — username/password mapped to a synthetic email
+│   ├── api/generate.js       # Vercel serverless function — authenticated enqueue proxy (server HF token)
+│   └── CLAUDE.md             # Frontend-specific conventions (RTL, API contract, glossary)
+├── hf_space/                 # Hugging Face Space (git submodule) — the deployed backend
+│   ├── gradio_app_lithophane.py   # Deployed entry point — runs the CadQuery engine despite the name
+│   ├── gradio_app.py         # Older variant, not deployed, may be stale
+│   ├── src/                  # Self-contained snapshot of src/ for deployment
+│   ├── config.yaml           # Self-contained snapshot of config.yaml
+│   └── requirements.txt      # App deps (includes `spaces` for ZeroGPU)
 ├── notebooks/
 │   └── text2stl_generator.ipynb   # Step-by-step dev/research notebook (one page)
+├── .claude/                  # Claude Code tooling: skills/ (slash commands) + instructions/
 ├── config.yaml               # All geometry, SD, and DXF constants (edit here, not in code)
 ├── requirements.txt
 └── pyproject.toml
@@ -75,9 +156,12 @@ book_generator_tom/
 
 ## Running locally
 
+The app lives in the `hf_space/` submodule and is self-contained:
+
 ```bash
-pip install -r requirements.txt
-python app/app.py
+pip install -r hf_space/requirements.txt
+cd hf_space
+python gradio_app_lithophane.py   # the maintained entry point — see note above on the name
 ```
 
 Open the Gradio URL in your browser:
@@ -124,13 +208,17 @@ All physical dimensions live in `config.yaml` — edit there without touching an
 
 ```yaml
 plate:
-  width_mm: 150.0          # base plate size
+  width_mm: 150.0                # base plate size
   height_mm: 150.0
-image_strokes:
-  width_mm: 1.0            # raised ridge thickness
-  height_mm: 1.5           # raised ridge height
-braille:
-  dome_height_ratio: 0.5   # dome height = radius × ratio
+  thickness_mm: 0.4
+layout:
+  text_frac: 0.18                # Hebrew text band (top), fraction of usable height
+  braille_frac: 0.18              # Braille band (bottom)
+tactile:
+  image_outline_height_mm: 1.8    # raised image ridges
+  text_height_mm: 1.0             # raised Hebrew text
+  braille_dot_height_mm: 0.6      # Braille dome height
+  braille_dot_radius_mm: 0.75     # standard Grade 1 dot radius
 stable_diffusion:
   inference_steps: 25
   guidance_scale: 8.5

@@ -12,7 +12,7 @@ Main class: FlowManager(book_name, pages)
   result = fm.run()
 
 Note: this module uses image_generator.py which calls add_nikud() (interactive input()).
-It is CLI-only — the web app (app/app.py) has its own generation pipeline.
+It is CLI-only — the web app (hf_space/gradio_app.py) has its own generation pipeline.
 """
 
 # ## we want flow manager, the flow manager knows to get a dict:

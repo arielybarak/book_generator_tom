@@ -6,13 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TOM generates **3D-printable tactile storybook pages** for blind children. The project was initiated with Eliya, an Israeli organization supporting blind children. Each page combines an AI-generated line-art image, raised Hebrew text (for a sighted adult reading alongside), and Braille (for the child) — all merged into a single STL file with distinct tactile height layers.
 
-The backend is deployed on **Hugging Face Spaces** (GPU). `app/app.py` is the Gradio app that runs there. A dedicated frontend is planned. The notebooks are for development and experimentation only.
+The backend is deployed on **Hugging Face Spaces** (GPU via ZeroGPU). The Space is its own git repo, vendored here as the **`hf_space/` submodule**; `hf_space/gradio_app_lithophane.py` is the deployed entry point. The public-facing React frontend lives in `web/` (React 19 + Vite + Tailwind v4, deployed to Vercel). The notebooks are for development and experimentation only.
 
 ## Running the app
 
 ```bash
-pip install -r requirements.txt
-python app/app.py          # Gradio web UI
+# Backend (Gradio, self-contained)
+pip install -r hf_space/requirements.txt
+cd hf_space && python gradio_app_lithophane.py
+
+# Frontend (React)
+cd web && npm install && npm run dev   # http://localhost:5173  (needs VITE_HF_SPACE env var)
 ```
 
 The font (`NotoSansSymbols2-Regular.ttf`) auto-downloads on first run via `ensure_font()` in `src/image_funcs.py`.
@@ -30,7 +34,7 @@ Hebrew input
 
 `src/flow_manager.py` wraps this for multi-page books. Pages are processed atomically — if any step throws, that page's state is not updated. Outputs land in `books/{name}_{timestamp}/`.
 
-`app/app.py` is the primary entry point. It imports from `src/` and adds the Gradio UI layer. It currently outputs DXF + PNG per page (ZIP download) — **STL generation via `src/dxf_3d.py` is not yet wired into the app**.
+`hf_space/gradio_app_lithophane.py` is the primary deployed entry point. It imports from `src/` and adds the Gradio UI layer plus a hidden `/generate_page` API endpoint used by the web frontend. The full pipeline is wired: per page it generates the image PNG, three DXFs (image/text/braille), and the final STL via `create_one_page_stl_from_dxf()`, then returns a ZIP. SD inference runs under a `@spaces.GPU` decorator (ZeroGPU); translation, DXF, and STL stay on CPU.
 
 ## Module responsibilities
 
@@ -48,18 +52,42 @@ All geometry is controlled by module-level constants:
 - `IMAGE_STROKE_WIDTH / IMAGE_STROKE_HEIGHT` — 1.0mm / 1.5mm for image ridges
 - `DOME_HEIGHT_RATIO` — Braille dome height = radius × 0.5
 
-## Import convention
+## web/ frontend
 
-All `src/` imports use the `src.` prefix. Always run scripts from the repo root:
-```python
-from src import language_funcs as lf
-from src.image_funcs import ensure_font, process_image_to_dxf
-```
+`web/` is a React 19 + Vite + Tailwind v4 SPA — the public Hebrew face of TOM. Its own conventions and API contract are in `web/CLAUDE.md`. Key points for the main repo:
+
+- **API**: the frontend speaks only to `/generate_page` on the HF Space. Inputs: `[raw_text, variations, image_desc, object_class]`. Outputs: `[image_url, stl_url]`.
+- **nikud sync**: `web/src/lib/nikud.js` option keys must mirror `SPECIAL_REPLACEMENTS` keys in `src/language_funcs.py` (`default`, `holam`, `shuruk`, `shin`, `sin`, `dagesh`). If backend keys change, update `nikud.js` too.
+- **Deploy**: Vercel project root = `web/`, env var `VITE_HF_SPACE` = HF Space id.
+- Does **not** use `sync_to_space.sh` — it never touches `hf_space/src/` directly.
 
 ## HF Spaces deployment note
 
-Hugging Face Spaces expects `app.py` at the repo root. When deploying, copy or symlink `app/app.py` to the root, or configure the Space entry point. `app_colab.ipynb` is the same app adapted to run on Colab with `share=True`.
+The app is **canonical in the `hf_space/` submodule** (HF Space repo: `MLightning/text2STL-engine-2.0-superMX-bottom`). It is self-contained — `hf_space/` bundles its own copies of the app file, `src/`, `config.yaml`, and `requirements.txt`. To change the app: edit inside `hf_space/`, then `git commit` + `git push` from that folder; HF auto-rebuilds. The entry point is `hf_space/gradio_app_lithophane.py` (set via `app_file:` in `hf_space/README.md`).
 
-## opencv dependency
+The repo-root `src/` is kept for the notebooks and CLI/FlowManager. `hf_space/` vendors a **copy** of `src/` + `config.yaml` (HF Spaces must be self-contained), so the two can drift. **After changing any `src/` module or `config.yaml` the app uses, run `./sync_to_space.sh`** from the repo root — it mirrors `src/` and `config.yaml` into `hf_space/` (rsync `--delete`, skips `__pycache__`). Then commit + push from inside `hf_space/` to redeploy.
 
-Use `opencv-contrib-python`, not `opencv-python` — the contrib build includes `cv2.ximgproc.thinning` (Zhang-Suen skeletonization) used in `image_to_dxf_exact()`. Without it, the code falls back to Canny edges (double lines).
+## Repo AI tooling (`.claude/`)
+
+Claude Code reads project-local config from `.claude/`. This repo ships a tuned setup:
+
+- **Skills** (`.claude/skills/<name>/SKILL.md`, auto-activate on matching work):
+  - `hf-space-sync-deploy` — the sync → push-from-`hf_space/` deploy procedure and its traps.
+  - `zerogpu-web-bridge` — ZeroGPU runtime rules: why `@gradio/client` hangs off-iframe, the 2-step REST call, anonymous quota cap, `gr.File` vs. `gr.Image`, CORS. Activate when editing the Space's web-facing endpoints or `hfClient.js`.
+  - `web-backend-contract` — the current `hfClient.js` implementation: CORS shim, wakeUp poll, SSE decoder, file-URL normalization, timeouts. Activate when editing `web/src/api/hfClient.js`.
+  - `tactile-stl-geometry` — page geometry lives in `config.yaml` (via `src/config.py`); keep the three tactile layers distinct and FDM-printable.
+  - `hebrew-braille-nikud` — Hebrew→Braille + nikud; the `SPECIAL_REPLACEMENTS` keys are a contract mirrored in `DISPLAY_MAPPING` and `web/src/lib/nikud.js`.
+  - `image-dxf-generation` — Stable Diffusion line-art → PNG → DXF; needs `opencv-contrib-python`, auto-downloads the Braille font.
+- **Commands** (`/<name>`):
+  - `/deploy-hf` — two-path deploy: app-file-only (commit+push from `hf_space/` directly) or src/config change (sync first, then commit+push).
+  - `/check-sync` — vendored-copy + nikud-parity report (read-only, pre-deploy drift check).
+  - `/hf-logs` — fetch live Space logs (run or build) to see real Python tracebacks. Use when generation fails server-side or the Space boots to RUNTIME_ERROR.
+  - `/space-probe` — zero-GPU health check: wake state, endpoints, CPU round-trip, CORS, file serving. First step for "site won't generate" triage.
+  - `/verify-generate` — confirm the fix worked: CPU-only by default (`ping_assets`), `--gpu` flag for a real generation (owner rule: never burn GPU just to test).
+  - `/new-page` — generate a page/book via `FlowManager` or the `dxf_3d.py` CLI.
+- **`tools/space_browser_test.mjs`** — browser E2E script (Playwright + Chromium) that drives the real Vercel origin so CORS and the fetch shim are exercised. Defaults to `slow_ping` (CPU); `GPU=true` for a full generation. Run from `web/` with the incantation in the file header.
+- **Hook**: `.claude/hooks/sync-guard.py` — PostToolUse **advisory** (never blocks): reminds to run `./sync_to_space.sh` after editing repo-root `src/`/`config.yaml`; warns when a vendored `hf_space/` copy is edited directly. Wired in `.claude/settings.json`.
+- **`.claude/instructions/python.instructions.md`** — Python conventions (ruff, `opencv-contrib-python`, `src.` imports, modern typing).
+
+Skills **must** live under `.claude/skills/` to be discovered. `.claude/` is currently untracked — `git add` it if you want the team to share these.
+

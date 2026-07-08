@@ -8,7 +8,11 @@ Responsibilities:
   Uses add_nikud() which calls input() — CLI-only, not suitable for web context.
 - images_to_dxf(): converts the three PNGs produced by create_images() to DXF files.
 
-Note: the web app (app/app.py) has its own SD pipeline and does NOT use this module.
+Note: the deployed HF Space (hf_space/gradio_app_lithophane.py) has its own SD
+pipeline and does NOT import this module — only FlowManager/CLI does. Therefore
+editing THIS file does NOT require ./sync_to_space.sh or a Space redeploy; you can
+ignore the sync-guard reminder when only this file changed. (Any sync-guard nag
+is a false alarm here.)
 """
 import torch
 import cv2
@@ -27,7 +31,8 @@ _pipe = None
 def _get_pipeline():
     global _pipe
     if _pipe is None:
-        model_id = cfg["stable_diffusion"]["model_id"]
+        sd_cfg = cfg["stable_diffusion"]
+        model_id = sd_cfg.get("image_model_id", sd_cfg["model_id"])
         dtype = torch.float16 if _device == "cuda" else torch.float32
         print(f"Loading Stable Diffusion ({model_id}) on {_device}...")
         _pipe = AutoPipelineForText2Image.from_pretrained(
@@ -38,30 +43,52 @@ def _get_pipeline():
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def create_images(hebrew_prompt, picture_type,
-                  image_output_location, text_output_location, braille_output_location):
+PRINT_FRIENDLY_STYLE = (
+    "icon, symbol, pictogram, single shape, basic geometric form, "
+    "child's drawing, crayon sketch, stick figure style, "
+    "ultra-minimal, flat solid shape, one color outline only, "
+    "no details, no texture, bold thick line, plain white background"
+)
+
+PRINT_FRIENDLY_NEGATIVE = (
+    "shading, gradients, texture, hatching, crosshatching, fill, solid color, "
+    "photorealistic, complex background, decorative, small details, "
+    "thin lines, clutter, noise, realistic lighting, busy composition, "
+    "interior detail, internal lines, patterns, perspective, 3D effect, "
+    "shadows, highlights, multiple objects"
+)
+
+def build_print_friendly_prompt(image_desc: str, object_class: str | None = None) -> str:
+    subject = f"{object_class}, " if object_class else ""
+    return (
+        f"{subject}{image_desc}, {PRINT_FRIENDLY_STYLE}, "
+        "single subject, centered composition, children book outline style"
+    )
+
+def build_negative_prompt() -> str:
+    return PRINT_FRIENDLY_NEGATIVE
+
+def create_images(
+    raw_text,
+    variations,
+    image_desc,
+    object_class,
+    image_output_location, text_output_location, braille_output_location
+):
     """
     Full single-page pipeline (CLI / FlowManager use).
     Calls add_nikud() which uses interactive input() — not suitable for web context.
     """
     imf.ensure_font()
 
-    eng_desc  = lf.hebrew_translator(hebrew_prompt)
-    eng_class = lf.hebrew_translator(picture_type)
+    eng_desc  = lf.hebrew_translator(raw_text)
+    eng_class = lf.hebrew_translator(image_desc)
 
     sd_cfg = cfg["stable_diffusion"]
-    prompt = (
-        f"A single isolated {eng_desc} centered on a white background, "
-        f"classified as {eng_class}. "
-        "Simple child's drawing, 2D flat design, outlines only, single thin black pen, "
-        "minimalistic, continuous single pen draw, broad strokes, white background."
-    )
-    negative_prompt = (
-        "background, scenery, extra items, shading, shadows, gradients, "
-        "fine lines, intricate details, realistic texture, 3D, depth, broken lines."
-    )
+    prompt = build_print_friendly_prompt(eng_desc, eng_class or object_class)
+    negative_prompt = build_negative_prompt()
 
-    pipe  = _get_pipeline()
+    pipe = _get_pipeline()
     image = pipe(
         prompt=prompt,
         negative_prompt=negative_prompt,
@@ -70,32 +97,47 @@ def create_images(hebrew_prompt, picture_type,
     ).images[0]
 
     # Braille conversion (requires interactive nikud input)
-    hebrew_with_nikud = lf.add_nikud(hebrew_prompt)
+    hebrew_with_nikud = lf.add_nikud(raw_text)
     braille = lf.convert_to_braille(hebrew_with_nikud)
 
-    # Image processing: edge detection → centering
+    # Image processing: edge detection → simplification → centering
     img_np     = np.array(image)
     gray       = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
-    edges      = cv2.Canny(gray, 50, 200)
-    kernel     = np.ones((5, 5), np.uint8)
-    edges      = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
-    edges      = cv2.bitwise_not(edges)
-    h, w       = edges.shape
+    
+    # Use threshold instead of Canny for cleaner, bolder shapes
+    _, binary  = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+    
+    # Dilate to thicken lines to minimum printable width (~1.5-2mm)
+    kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    binary = cv2.dilate(binary, kernel_dilate, iterations=2)
+    
+    # Erode back slightly to clean up rough edges
+    kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    binary = cv2.erode(binary, kernel_erode, iterations=1)
+    
+    # Remove small noise specks (keep only major shapes)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    clean = np.zeros_like(binary)
+    for i in range(1, num_labels):
+        if stats[i, cv2.CC_STAT_AREA] >= 200:  # only keep large shapes
+            clean[labels == i] = 255
+    
+    edges = cv2.bitwise_not(clean)
+    h, w  = edges.shape
     edges[h-1:h, w-1:w] = 255
 
     ys, xs = np.where(edges[1:h-1, 1:w-1] == 0)
-    shift_x = int(w / 2 - xs.mean())
-    shift_y = int(h / 2 - ys.mean())
+    if len(xs) > 0:
+        shift_x = int(w / 2 - xs.mean())
+        shift_y = int(h / 2 - ys.mean())
+    else:
+        shift_x = shift_y = 0
     centered = cv2.warpAffine(
         edges, np.float32([[1, 0, shift_x], [0, 1, shift_y]]), (w, h), borderValue=255
     )
 
     # Save image PNG
-    plt.figure(figsize=(5, 5))
-    plt.imshow(centered, cmap="gray")
-    plt.axis("off")
-    plt.savefig(image_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
-    plt.close()
+    cv2.imwrite(str(image_output_location), centered)
 
     # Save Hebrew text PNG
     plt.figure(figsize=(5, 5))

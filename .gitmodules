@@ -1,0 +1,3 @@
+[submodule "hf_space"]
+	path = hf_space
+	url = https://huggingface.co/spaces/MLightning/text2STL-engine-2.0-superMX-bottom

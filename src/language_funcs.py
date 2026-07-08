@@ -177,7 +177,7 @@ def letter_to_braille(base, marks):
 def convert_to_braille(text):
     """
     Convert Hebrew text (with optional nikud) to a Braille Unicode string.
-    Result is reversed so it reads left-to-right for tactile use.
+    Output is left-to-right (Braille is always read LTR regardless of source language).
     """
     result = []
     i = 0
@@ -194,4 +194,23 @@ def convert_to_braille(text):
         else:
             result.append(ch)
             i += 1
-    return "".join(result[::-1])
+    return "".join(result)
+
+
+# ── English → Braille (Grade 1, uncontracted) ─────────────────────────────────
+ENGLISH_BRAILLE_MAP = {
+    'a': '⠁', 'b': '⠃', 'c': '⠉', 'd': '⠙', 'e': '⠑', 'f': '⠋', 'g': '⠛',
+    'h': '⠓', 'i': '⠊', 'j': '⠚', 'k': '⠅', 'l': '⠇', 'm': '⠍', 'n': '⠝',
+    'o': '⠕', 'p': '⠏', 'q': '⠟', 'r': '⠗', 's': '⠎', 't': '⠞', 'u': '⠥',
+    'v': '⠧', 'w': '⠺', 'x': '⠭', 'y': '⠽', 'z': '⠵', ' ': ' ',
+}
+
+
+def english_to_braille(text):
+    """English → Grade-1 (uncontracted) Unicode Braille, left-to-right. Unknown chars dropped."""
+    return "".join(ENGLISH_BRAILLE_MAP.get(c, '') for c in text.lower())
+
+
+def text_to_braille(text, language='hebrew'):
+    """Language-aware Braille: Hebrew (RTL→reversed) or English (Grade-1, LTR)."""
+    return english_to_braille(text) if language == 'english' else convert_to_braille(text)

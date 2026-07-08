@@ -24,7 +24,9 @@ Implementation notes:
 """
 
 import argparse
+import functools
 import math
+import time
 from pathlib import Path
 from typing import List, Tuple
 
@@ -37,6 +39,10 @@ import pyclipper
 
 from src.config import cfg
 
+# Force flushed prints: on HF Spaces stdout is a block-buffered pipe (not a TTY), so
+# unflushed build progress lags the log and the build looks "stuck at Text solids".
+print = functools.partial(print, flush=True)
+
 Point    = Tuple[float, float]
 CircleDef = Tuple[Tuple[float, float], float]
 
@@ -47,6 +53,16 @@ BASE_WIDTH          = cfg["plate"]["width_mm"]
 BASE_HEIGHT         = cfg["plate"]["height_mm"]
 BASE_THICKNESS      = cfg["plate"]["thickness_mm"]
 BASE_CORNER_RADIUS  = cfg["plate"]["corner_radius_mm"]
+# Border kept clear of content when laying the page out.
+CONTENT_MARGIN_MM   = cfg["plate"].get("content_margin_mm", 10.0)
+
+# Banded page layout (fractions of the usable height): Hebrew text strip on top,
+# image in the middle, Braille strip on the bottom. Each band is filled independently
+# so the three tactile layers don't overlap.
+_layout = cfg.get("layout", {})
+TEXT_BAND_FRAC      = _layout.get("text_frac", 0.18)
+BRAILLE_BAND_FRAC   = _layout.get("braille_frac", 0.18)
+BAND_GAP_MM         = _layout.get("band_gap_mm", 4.0)
 
 _t = cfg["tactile"]
 
@@ -88,6 +104,12 @@ MOUNTING_HOLE_SPACING      = cfg["mounting_holes"]["spacing_mm"]
 # Aliases used as CLI defaults
 IMAGE_STROKE_WIDTH  = IMAGE_OUTLINE_WIDTH
 IMAGE_STROKE_HEIGHT = IMAGE_OUTLINE_HEIGHT
+
+# `extrude(taper=…)` SEGFAULTS inside OCCT on real Hebrew glyph outlines — a C-level
+# crash that kills the whole worker. Dome tops are achieved instead via safe_fillet_top
+# (post-extrude top-edge fillet). Raise STROKE_TAPER_DEG > 0 only with a crash-isolated
+# subprocess extrude.
+STROKE_TAPER_DEG = 0.0
 
 
 # =========================
@@ -175,27 +197,80 @@ def translate_circles(circles: List[CircleDef], dx: float, dy: float) -> List[Ci
     return [((cx + dx, cy + dy), r) for (cx, cy), r in circles]
 
 
-def center_all_content_on_base(
+def _xform_paths(paths: List[List[Point]], s: float, cx: float, cy: float, tx: float, ty: float) -> List[List[Point]]:
+    """Scale each point about (cx, cy) by s, then translate so (cx, cy) lands at (tx, ty)."""
+    return [[((x - cx) * s + tx, (y - cy) * s + ty) for x, y in p] for p in paths]
+
+
+def _xform_circles(circles: List[CircleDef], s: float, cx: float, cy: float, tx: float, ty: float) -> List[CircleDef]:
+    return [(((px - cx) * s + tx, (py - cy) * s + ty), r * s) for (px, py), r in circles]
+
+
+def _fit_transform(paths, circles, x0, y0, x1, y1):
+    """
+    Transform (s, cx, cy, tx, ty) that scales the combined bbox of `paths`+`circles`
+    to fit inside the rectangle [x0,y0]–[x1,y1] (uniform, aspect-preserving) and
+    centres it there. Returns None when there is no content.
+    """
+    bx0, by0, bx1, by1 = bbox_of_paths(paths, circles)
+    w, h = bx1 - bx0, by1 - by0
+    if w <= 0 or h <= 0:
+        return None
+    s = min((x1 - x0) / w, (y1 - y0) / h)
+    return (s, (bx0 + bx1) / 2.0, (by0 + by1) / 2.0, (x0 + x1) / 2.0, (y0 + y1) / 2.0)
+
+
+def layout_content_on_base(
     text_shapes: List[List[Point]],
     braille_circles: List[CircleDef],
     image_closed_paths: List[List[Point]],
     image_open_paths: List[List[Point]],
 ) -> Tuple[List[List[Point]], List[CircleDef], List[List[Point]], List[List[Point]]]:
-    all_paths = text_shapes + image_closed_paths + image_open_paths
-    min_x, min_y, max_x, max_y = bbox_of_paths(all_paths, braille_circles)
-    width  = max_x - min_x
-    height = max_y - min_y
-    print(f"  Overall content size: {width:.2f}mm x {height:.2f}mm")
-    cx = (min_x + max_x) / 2.0
-    cy = (min_y + max_y) / 2.0
-    dx = BASE_WIDTH  / 2.0 - cx
-    dy = BASE_HEIGHT / 2.0 - cy
-    return (
-        translate_paths(text_shapes, dx, dy),
-        translate_circles(braille_circles, dx, dy),
-        translate_paths(image_closed_paths, dx, dy),
-        translate_paths(image_open_paths, dx, dy),
-    )
+    """
+    Lay the three tactile layers out in horizontal bands so they don't overlap:
+        ┌─────────────── Hebrew text  (top strip) ───────────────┐
+        │                    line-art image  (middle)            │
+        └─────────────── Braille dots  (bottom strip) ───────────┘
+    Each band is filled independently — the DXF layers arrive at mismatched, oversized
+    coordinate systems (image/text ~1500mm, braille ~px), so each is scaled to fit its
+    own band. Image closed+open paths share ONE transform to stay registered.
+    """
+    m = CONTENT_MARGIN_MM
+    x0, x1 = m, BASE_WIDTH - m
+    usable_h = BASE_HEIGHT - 2 * m
+    text_h = TEXT_BAND_FRAC * usable_h
+    brl_h  = BRAILLE_BAND_FRAC * usable_h
+    g = BAND_GAP_MM
+
+    # y measured from the plate bottom (0) up to BASE_HEIGHT
+    brl_y0, brl_y1 = m, m + brl_h                                   # bottom strip
+    txt_y1, txt_y0 = BASE_HEIGHT - m, BASE_HEIGHT - m - text_h      # top strip
+    img_y0, img_y1 = brl_y1 + g, txt_y0 - g                         # middle
+
+    # Hebrew text → top band
+    t_txt = _fit_transform(text_shapes, [], x0, txt_y0, x1, txt_y1)
+    text_out = _xform_paths(text_shapes, *t_txt) if t_txt else text_shapes
+
+    # Braille → bottom band at its NATIVE Grade-1 size (it is generated at fixed mm
+    # spacing). Do NOT stretch it to fill the band — that would blow up the dot gaps for
+    # short words. Centre it; only shrink if a long word would overflow the plate width.
+    bx0, by0, bx1, by1 = bbox_of_paths([], braille_circles)
+    bw, bh = bx1 - bx0, by1 - by0
+    if bw > 0 and bh > 0:
+        s_brl = min(1.0, (x1 - x0) / bw, (brl_y1 - brl_y0) / bh)
+        brl_out = _xform_circles(braille_circles, s_brl, (bx0 + bx1) / 2.0, (by0 + by1) / 2.0,
+                                 (x0 + x1) / 2.0, (brl_y0 + brl_y1) / 2.0)
+    else:
+        brl_out = braille_circles
+
+    # Image (closed + open) → middle band, one shared transform to keep it registered
+    t_img = _fit_transform(image_closed_paths + image_open_paths, [], x0, img_y0, x1, img_y1)
+    img_closed_out = _xform_paths(image_closed_paths, *t_img) if t_img else image_closed_paths
+    img_open_out   = _xform_paths(image_open_paths,   *t_img) if t_img else image_open_paths
+
+    print(f"  Layout → text band {text_h:.0f}mm / image {img_y1 - img_y0:.0f}mm / "
+          f"braille band {brl_h:.0f}mm  (margin {m:.0f}mm)")
+    return text_out, brl_out, img_closed_out, img_open_out
 
 
 def safe_fillet_top(solid: cq.Workplane, radius: float) -> cq.Workplane:
@@ -343,10 +418,36 @@ def create_base_plate() -> cq.Workplane:
     return base
 
 
-def extrude_text_solids(base: cq.Workplane, shapes: List[List[Point]], height: float) -> cq.Workplane:
-    """Extrude closed text polygons as solid ridges with filleted top edges."""
+def _capped_solid(pts: List[Point], height: float, offset: float = None, round_top: bool = True):
+    """
+    Extrude polygon `pts` to `height`. When `round_top` is True, a top-edge fillet
+    (dome profile) is applied after extrusion for a finger-friendly tactile feel.
+    Falls back silently to a flat-top solid if CadQuery rejects the fillet.
+
+    Pass round_top=False for thin detail strokes where the fillet adds cost without
+    perceptible tactile benefit.
+    """
+    z = BASE_THICKNESS if offset is None else offset
+
+    def _profile():
+        return cq.Workplane("XY").workplane(offset=z).polyline(pts).close()
+
+    if round_top and EDGE_FILLET_ENABLED and STROKE_TAPER_DEG > 0:
+        try:
+            return _profile().extrude(height, taper=STROKE_TAPER_DEG).val()
+        except Exception:
+            pass
+
+    solid = _profile().extrude(height)
+    if round_top:
+        solid = safe_fillet_top(solid, height * EDGE_FILLET_RATIO)
+    return solid.val()
+
+
+def extrude_text_solids(shapes: List[List[Point]], height: float) -> List:
+    """Extrude closed text polygons as solid ridges with dome-rounded top edges."""
     print(f"  Text solids: {len(shapes)} closed shapes")
-    fillet_r = height * EDGE_FILLET_RATIO
+    solids = []
     for i, pts in enumerate(shapes, 1):
         pts = clean_polyline_points(pts, POINT_CLEAN_TOL)
         if len(pts) < 3:
@@ -354,15 +455,10 @@ def extrude_text_solids(base: cq.Workplane, shapes: List[List[Point]], height: f
         if polygon_area(pts) < 0:
             pts = list(reversed(pts))
         try:
-            solid = (cq.Workplane("XY")
-                     .workplane(offset=BASE_THICKNESS)
-                     .polyline(pts).close()
-                     .extrude(height))
-            solid = safe_fillet_top(solid, fillet_r)
-            base = base.union(solid)
+            solids.append(_capped_solid(pts, height))
         except Exception as e:
             print(f"    Warning: text shape {i} skipped: {e}")
-    return base
+    return solids
 
 
 def create_dome(cx: float, cy: float, base_radius: float, height: float) -> cq.Workplane:
@@ -379,7 +475,7 @@ def create_dome(cx: float, cy: float, base_radius: float, height: float) -> cq.W
     return dome.cut(cut_box)
 
 
-def add_braille_domes(base: cq.Workplane, circles: List[CircleDef]) -> cq.Workplane:
+def add_braille_domes(circles: List[CircleDef]) -> List:
     """
     Build Braille domes using fixed Grade 1 dimensions from config
     (braille_dot_radius_mm, braille_dot_height_mm), ignoring the detected radius
@@ -387,12 +483,13 @@ def add_braille_domes(base: cq.Workplane, circles: List[CircleDef]) -> cq.Workpl
     """
     print(f"  Braille domes: {len(circles)} circles  "
           f"r={BRAILLE_FIXED_RADIUS}mm  h={BRAILLE_FIXED_HEIGHT}mm")
+    solids = []
     for i, ((cx, cy), _) in enumerate(circles, 1):
         try:
-            base = base.union(create_dome(cx, cy, BRAILLE_FIXED_RADIUS, BRAILLE_FIXED_HEIGHT))
+            solids.append(create_dome(cx, cy, BRAILLE_FIXED_RADIUS, BRAILLE_FIXED_HEIGHT).val())
         except Exception as e:
             print(f"    Warning: dome {i} skipped: {e}")
-    return base
+    return solids
 
 
 def clipper_clean_and_simplify(poly: List[Point], clean_tol_mm: float) -> List[List[Point]]:
@@ -442,22 +539,23 @@ def stroke_polygons_from_centerline(points: List[Point], half_width: float, clos
 
 
 def _extrude_one_centerline(
-    base: cq.Workplane,
+    solids: List,
     pts: List[Point],
     is_closed: bool,
     half_width: float,
     stroke_height: float,
     idx: int,
-) -> cq.Workplane:
+    round_top: bool = False,
+) -> None:
     """
-    Simplify, stroke, and extrude one centerline path as a dome-topped ridge.
-    Fillet radius = stroke_height × EDGE_FILLET_RATIO approximates a semi-ellipse profile.
+    Simplify, stroke, and extrude one centerline path as a ridge, appending the
+    resulting solids to `solids`. `round_top` applies a top-edge fillet for a dome
+    profile (only worth it for wide outlines; thin details stay flat).
     """
     pts = rdp_simplify(clean_polyline_points(pts, POINT_CLEAN_TOL), PATH_SIMPLIFY_TOL)
     if len(pts) < 2:
-        return base
+        return
 
-    fillet_r    = stroke_height * EDGE_FILLET_RATIO
     stroke_polys = stroke_polygons_from_centerline(pts, half_width, is_closed)
 
     for poly in stroke_polys:
@@ -468,29 +566,22 @@ def _extrude_one_centerline(
             if polygon_area(p2) < 0:
                 p2 = list(reversed(p2))
             try:
-                solid = (cq.Workplane("XY")
-                         .workplane(offset=BASE_THICKNESS)
-                         .polyline(p2).close()
-                         .extrude(stroke_height))
-                solid = safe_fillet_top(solid, fillet_r)
-                base  = base.union(solid)
+                solids.append(_capped_solid(p2, stroke_height, round_top=round_top))
             except Exception as e:
                 print(f"    Warning: image stroke {idx} polygon skipped: {e}")
-    return base
 
 
 def extrude_image_strokes(
-    base: cq.Workplane,
     closed_paths: List[List[Point]],
     open_paths:   List[List[Point]],
     circles:      List[CircleDef],
     outline_height: float = IMAGE_OUTLINE_HEIGHT,
     outline_width:  float = IMAGE_OUTLINE_WIDTH,
-) -> cq.Workplane:
+) -> List:
     """
-    Extrude image paths as dome-topped ridges with a two-tier height hierarchy:
-      - Closed paths with |area| ≥ OUTLINE_MIN_AREA → main outline (taller, wider)
-      - All other paths and open paths       → detail  (shorter, narrower)
+    Extrude image paths as ridges with a two-tier height hierarchy:
+      - Closed paths with |area| ≥ OUTLINE_MIN_AREA → main outline (taller, wider, dome top)
+      - All other paths and open paths               → detail  (shorter, narrower, flat top)
 
     All paths are Douglas-Peucker simplified before extrusion.
     """
@@ -511,24 +602,28 @@ def extrude_image_strokes(
           f"{n_detail} details "
           f"({IMAGE_DETAIL_HEIGHT:.1f}mm × {IMAGE_DETAIL_WIDTH:.1f}mm)")
 
+    solids: List = []
     idx = 1
+    # Main outlines get dome tops (few, wide strokes — fillet is worthwhile).
+    # Detail strokes stay flat (many, thin — indistinguishable by touch and faster).
     for pts in closed_paths:
         if abs(polygon_area(pts)) >= OUTLINE_MIN_AREA:
             h, w = outline_height, outline_width
+            _extrude_one_centerline(solids, pts, True, w / 2, h, idx, round_top=True)
         else:
             h, w = IMAGE_DETAIL_HEIGHT, IMAGE_DETAIL_WIDTH
-        base = _extrude_one_centerline(base, pts, True,  w / 2, h, idx)
+            _extrude_one_centerline(solids, pts, True, w / 2, h, idx, round_top=False)
         idx += 1
 
     for pts in open_paths:
-        base = _extrude_one_centerline(base, pts, False, IMAGE_DETAIL_WIDTH / 2, IMAGE_DETAIL_HEIGHT, idx)
+        _extrude_one_centerline(solids, pts, False, IMAGE_DETAIL_WIDTH / 2, IMAGE_DETAIL_HEIGHT, idx, round_top=False)
         idx += 1
 
     for pts in circle_paths:
-        base = _extrude_one_centerline(base, pts, True,  IMAGE_DETAIL_WIDTH / 2, IMAGE_DETAIL_HEIGHT, idx)
+        _extrude_one_centerline(solids, pts, True,  IMAGE_DETAIL_WIDTH / 2, IMAGE_DETAIL_HEIGHT, idx, round_top=False)
         idx += 1
 
-    return base
+    return solids
 
 
 # =========================
@@ -577,9 +672,8 @@ def _hatch_lines(polygon: List[Point], spacing: float, angle_deg: float = 0.0) -
 
 
 def add_texture_fills(
-    base: cq.Workplane,
     closed_paths: List[List[Point]],
-) -> cq.Workplane:
+) -> List:
     """
     Fill large / medium closed regions with subtle hatch or crosshatch ridges.
 
@@ -591,10 +685,11 @@ def add_texture_fills(
     pattern reads as a texture rather than a structural element.
     """
     if not TEXTURE_ENABLED:
-        return base
+        return []
 
     half_w = TEXTURE_RIDGE_WIDTH / 2.0
 
+    solids: List = []
     for pts in closed_paths:
         area = abs(polygon_area(pts))
         if area < TEXTURE_MEDIUM_AREA:
@@ -619,10 +714,10 @@ def add_texture_fills(
                                  .workplane(offset=BASE_THICKNESS)
                                  .polyline(p2).close()
                                  .extrude(TEXTURE_HEIGHT))
-                        base = base.union(solid)
+                        solids.append(solid.val())
                     except Exception:
                         pass
-    return base
+    return solids
 
 
 def create_mounting_holes(base: cq.Workplane) -> cq.Workplane:
@@ -687,7 +782,7 @@ def create_one_page_stl_from_dxf(
         image_closed, image_open, image_circles = extract_image_centerlines(image_dxf)
         print(f"  Image paths: closed={len(image_closed)} open={len(image_open)} circles={len(image_circles)}")
 
-    text_shapes, braille_circles, image_closed, image_open = center_all_content_on_base(
+    text_shapes, braille_circles, image_closed, image_open = layout_content_on_base(
         text_shapes=text_shapes,
         braille_circles=braille_circles,
         image_closed_paths=image_closed,
@@ -695,25 +790,41 @@ def create_one_page_stl_from_dxf(
     )
 
     print("\nBuilding model...")
-    model = create_base_plate()
+    # Cut mounting holes from the single base solid (cheap — a few cuts).
+    base = create_mounting_holes(create_base_plate())
 
+    # Build every tactile feature as an independent solid; DO NOT boolean-fuse them.
+    # OCCT booleans do not scale to real line-art (one page = thousands of overlapping
+    # stroke solids → minutes-to-hours). Instead emit a multi-volume mesh and let the
+    # slicer union the overlaps at print time — ~190× faster, valid for FDM.
+    parts: List = []
     if text_shapes:
-        model = extrude_text_solids(model, text_shapes, height=text_height)
+        t0 = time.time()
+        parts += extrude_text_solids(text_shapes, height=text_height)
+        print(f"    [t] text {time.time() - t0:.1f}s")
 
     if braille_circles:
-        model = add_braille_domes(model, braille_circles)
+        t0 = time.time()
+        parts += add_braille_domes(braille_circles)
+        print(f"    [t] braille {time.time() - t0:.1f}s")
 
     if image_dxf and (image_closed or image_open or image_circles):
-        model = extrude_image_strokes(
-            model, image_closed, image_open, image_circles,
+        t0 = time.time()
+        parts += extrude_image_strokes(
+            image_closed, image_open, image_circles,
             outline_height=stroke_height,
             outline_width=stroke_width,
         )
+        print(f"    [t] image strokes {time.time() - t0:.1f}s  (parts so far: {len(parts)})")
         if TEXTURE_ENABLED and image_closed:
             print("  Adding texture fills...")
-            model = add_texture_fills(model, image_closed)
+            t0 = time.time()
+            parts += add_texture_fills(image_closed)
+            print(f"    [t] texture {time.time() - t0:.1f}s")
 
-    model = create_mounting_holes(model)
+    t0 = time.time()
+    model = cq.Compound.makeCompound([base.val()] + parts)
+    print(f"  Assembled {len(parts)} feature solids (no boolean union) in {time.time() - t0:.1f}s")
 
     out = Path(output) if output else None
     if out is None:
@@ -721,8 +832,9 @@ def create_one_page_stl_from_dxf(
         elif txt_dxf:  out = txt_dxf.with_suffix(".stl")
         else:          out = braille_dxf.with_suffix(".stl")
 
+    t0 = time.time()
     cq.exporters.export(model, str(out))
-    print(f"\nExported STL: {out}")
+    print(f"\nExported STL: {out}  ({time.time() - t0:.1f}s)")
 
     if export_step:
         step_out = out.with_suffix(".step")
