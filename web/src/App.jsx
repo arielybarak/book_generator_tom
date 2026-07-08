@@ -5,6 +5,7 @@ import { Landing } from './components/Landing'
 import { BookBuilder } from './components/BookBuilder'
 import { GenerateStep } from './components/GenerateStep'
 import { AuthScreen } from './components/AuthScreen'
+import { About } from './components/About'
 import { useLang } from './lib/i18n'
 import { useAuth } from './lib/auth'
 
@@ -52,7 +53,7 @@ function LanguageSwitcher() {
   )
 }
 
-function Header({ step, onStepClick }) {
+function Header({ step, onStepClick, view, onToggleAbout }) {
   const { t } = useLang()
   const { session, signOut } = useAuth()
   const username = session?.user?.email?.split('@')[0] ?? null
@@ -65,6 +66,16 @@ function Header({ step, onStepClick }) {
         </div>
         <div className="flex items-center gap-3">
           <Stepper current={step} onStepClick={onStepClick} />
+          <button
+            type="button"
+            onClick={onToggleAbout}
+            aria-current={view === 'about' ? 'page' : undefined}
+            className={`text-sm font-semibold transition ${
+              view === 'about' ? 'text-ink underline' : 'text-muted hover:text-ink'
+            }`}
+          >
+            {t.about.navLabel}
+          </button>
           <LanguageSwitcher />
           {session && (
             <div className="flex items-center gap-2">
@@ -112,6 +123,8 @@ export default function App() {
   const [step, setStep] = useState(saved?.step ?? 0)
   const [book, setBook] = useState(saved?.book ?? { title: '', pages: [] })
   const [results, setResults] = useState(saved?.results ?? {}) // pageId -> { imageUrl, stlUrl }
+  // 'create' | 'about' — not persisted; a refresh always returns to the saved flow.
+  const [view, setView] = useState('create')
 
   useEffect(() => {
     try {
@@ -140,48 +153,59 @@ export default function App() {
   return (
     <MotionConfig reducedMotion="user">
       <div className="flex min-h-dvh flex-col">
-        <Header step={step} onStepClick={goTo} />
+        <Header
+          step={step}
+          onStepClick={(n) => {
+            setView('create')
+            goTo(n)
+          }}
+          view={view}
+          onToggleAbout={() => setView(view === 'about' ? 'create' : 'about')}
+        />
         <main className="flex-1">
-          {step === 0 && <Landing onStart={() => setStep(1)} />}
-          {step === 1 && (
-            <BookBuilder book={book} setBook={setBook} onGenerate={() => setStep(2)} />
-          )}
-          {step === 2 && (
-            authLoading
-              ? (
-                <div className="flex min-h-96 items-center justify-center">
-                  <span
-                    className="border-brand-soft border-t-brand inline-block h-10 w-10 animate-spin rounded-full border-4"
-                    aria-label="…"
-                  />
-                </div>
-              )
-              : session
+          {view === 'about' && <About onBack={() => setView('create')} />}
+          <div hidden={view === 'about'}>
+            {step === 0 && <Landing onStart={() => setStep(1)} />}
+            {step === 1 && (
+              <BookBuilder book={book} setBook={setBook} onGenerate={() => setStep(2)} />
+            )}
+            {step === 2 && (
+              authLoading
                 ? (
-                  <GenerateStep
-                    book={book}
-                    results={results}
-                    setResults={setResults}
-                    onNext={() => setStep(3)}
-                    onBack={() => goTo(1)}
-                  />
+                  <div className="flex min-h-96 items-center justify-center">
+                    <span
+                      className="border-brand-soft border-t-brand inline-block h-10 w-10 animate-spin rounded-full border-4"
+                      aria-label="…"
+                    />
+                  </div>
                 )
-                : <AuthScreen />
-          )}
-          {step === 3 && (
-            <Suspense
-              fallback={
-                <div className="flex min-h-96 items-center justify-center">
-                  <span
-                    className="border-brand-soft border-t-brand inline-block h-10 w-10 animate-spin rounded-full border-4"
-                    aria-label="טוען…"
-                  />
-                </div>
-              }
-            >
-              <DownloadStep book={book} results={results} onRestart={restart} />
-            </Suspense>
-          )}
+                : session
+                  ? (
+                    <GenerateStep
+                      book={book}
+                      results={results}
+                      setResults={setResults}
+                      onNext={() => setStep(3)}
+                      onBack={() => goTo(1)}
+                    />
+                  )
+                  : <AuthScreen />
+            )}
+            {step === 3 && (
+              <Suspense
+                fallback={
+                  <div className="flex min-h-96 items-center justify-center">
+                    <span
+                      className="border-brand-soft border-t-brand inline-block h-10 w-10 animate-spin rounded-full border-4"
+                      aria-label="טוען…"
+                    />
+                  </div>
+                }
+              >
+                <DownloadStep book={book} results={results} onRestart={restart} />
+              </Suspense>
+            )}
+          </div>
         </main>
         <Footer />
       </div>

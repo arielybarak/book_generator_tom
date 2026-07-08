@@ -17,7 +17,7 @@ export const NIKUD = {
     options: [
       { key: 'default', glyph: 'ו', sound: 'V', example: 'וֶרֶד' },
       { key: 'holam', glyph: 'וֹ', sound: 'O', example: 'אוֹר' },
-      { key: 'shuruk', glyph: 'וּ', sound: 'U', example: 'כּוּס' },
+      { key: 'shuruk', glyph: 'וּ', sound: 'U', example: 'חוּמוּס' },
     ],
   },
   ש: {
