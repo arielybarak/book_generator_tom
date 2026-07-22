@@ -97,6 +97,8 @@ export const COPY = {
         'הפרויקט נוצר יחד עם עמותת אלי״ה, התומכת בילדים עיוורים ולקויי ראייה בישראל, מתוך רצון פשוט: שכל הורה יוכל להכין לילד שלו ספר שקוראים בידיים. כותבים משפט, מתארים ציור — ומקבלים עמוד מוחשי שאפשר להדפיס בבית או במעבדת הדפסה.',
       linkCta: 'לאתר TOM — Tikkun Olam Makers',
       logoAlt: 'TOM — Tikkun Olam Makers',
+      teamTitle: 'הצוות',
+      emailLabel: 'אימייל',
       back: 'חזרה ליצירת הספר',
     },
 
@@ -198,6 +200,8 @@ export const COPY = {
         'The project was created together with Eliya, an Israeli organization supporting blind and visually-impaired children, out of a simple wish: that every parent could make their child a book that is read with the hands. Write a sentence, describe a picture — and get a tactile page you can print at home or at a printing lab.',
       linkCta: 'Visit TOM — Tikkun Olam Makers',
       logoAlt: 'TOM — Tikkun Olam Makers',
+      teamTitle: 'The team',
+      emailLabel: 'Email',
       back: 'Back to your book',
     },
 
