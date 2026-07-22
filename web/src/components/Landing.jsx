@@ -44,7 +44,6 @@ export function Landing({ onStart }) {
               {t.landing.cta}
               <span aria-hidden="true">{t.common.arrowNext}</span>
             </Button>
-            <p className="text-muted mt-4 text-sm">{t.landing.note}</p>
           </motion.div>
         </motion.div>
 

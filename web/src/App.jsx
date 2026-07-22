@@ -111,8 +111,8 @@ function Footer({ view, onToggleAbout }) {
           type="button"
           onClick={onToggleAbout}
           aria-current={view === 'about' ? 'page' : undefined}
-          className={`font-semibold transition ${
-            view === 'about' ? 'text-ink underline' : 'hover:text-ink'
+          className={`text-ink font-bold transition hover:underline ${
+            view === 'about' ? 'underline' : ''
           }`}
         >
           {t.about.navLabel}

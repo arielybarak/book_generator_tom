@@ -14,7 +14,6 @@ export const COPY = {
       headline: 'הופכים משפט לעמוד שאפשר לגעת בו',
       sub: 'כותבים משפט בעברית, מתארים את הציור — ומקבלים עמוד מוכן להדפסה בתלת־ממד, עם ציור בולט, טקסט וברייל. בלי שום ידע טכני.',
       cta: 'בואו ניצור ספר',
-      note: 'מתאים להורים, גננות וכל מי שרוצה לספר סיפור במגע.',
       galleryTitle: 'כך נראה עמוד גמור',
     },
 
@@ -118,7 +117,6 @@ export const COPY = {
       headline: 'Turn a sentence into a page you can touch',
       sub: 'Write a sentence, describe the picture — and get a 3D-printable page with a raised drawing, text and Braille. No technical knowledge needed.',
       cta: 'Let’s make a book',
-      note: 'For parents, teachers and anyone who wants to tell a story by touch.',
       galleryTitle: 'This is what a finished page looks like',
     },
 
