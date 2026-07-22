@@ -31,7 +31,7 @@ function LanguageSwitcher() {
     <div
       role="group"
       aria-label={t.common.language}
-      className="border-line bg-surface flex shrink-0 items-center gap-1 rounded-full border p-1 text-sm"
+      className="border-line bg-surface flex shrink-0 items-center gap-0.5 rounded-full border p-0.5 text-xs"
     >
       {[
         ['hebrew', 'עב'],
@@ -42,7 +42,7 @@ function LanguageSwitcher() {
           type="button"
           onClick={() => setLang(val)}
           aria-pressed={lang === val}
-          className={`rounded-full px-3 py-1 font-bold transition ${
+          className={`rounded-full px-2.5 py-0.5 font-bold transition ${
             lang === val ? 'bg-brand text-white' : 'text-muted hover:text-ink'
           }`}
         >
@@ -66,29 +66,33 @@ function Header({ step, onStepClick, view, onToggleAbout }) {
         </div>
         <div className="flex items-center gap-3">
           <Stepper current={step} onStepClick={onStepClick} />
-          <button
-            type="button"
-            onClick={onToggleAbout}
-            aria-current={view === 'about' ? 'page' : undefined}
-            className={`text-sm font-semibold transition ${
-              view === 'about' ? 'text-ink underline' : 'text-muted hover:text-ink'
-            }`}
-          >
-            {t.about.navLabel}
-          </button>
-          <LanguageSwitcher />
-          {session && (
-            <div className="flex items-center gap-2">
-              {username && <span className="text-muted hidden text-sm sm:inline">{username}</span>}
-              <button
-                type="button"
-                onClick={signOut}
-                className="text-muted hover:text-ink text-sm font-semibold transition"
-              >
-                {t.auth.logout}
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onToggleAbout}
+              aria-current={view === 'about' ? 'page' : undefined}
+              className={`text-xs font-semibold transition ${
+                view === 'about' ? 'text-ink underline' : 'text-muted hover:text-ink'
+              }`}
+            >
+              {t.about.navLabel}
+            </button>
+            <LanguageSwitcher />
+            {session && (
+              <div className="flex items-center gap-1.5">
+                {username && (
+                  <span className="text-muted hidden text-xs sm:inline">{username}</span>
+                )}
+                <button
+                  type="button"
+                  onClick={signOut}
+                  className="text-muted hover:text-ink text-xs font-semibold transition"
+                >
+                  {t.auth.logout}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </header>
