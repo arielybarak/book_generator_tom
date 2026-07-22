@@ -53,57 +53,45 @@ function LanguageSwitcher() {
   )
 }
 
-function Header({ step, onStepClick, view, onToggleAbout }) {
+function Header({ step, onStepClick }) {
   const { t } = useLang()
   const { session, signOut } = useAuth()
   const username = session?.user?.email?.split('@')[0] ?? null
   return (
     <header className="border-line bg-paper/80 sticky top-0 z-10 border-b backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-4">
-        <div className="flex items-center gap-2">
-          <img src="/tom-logo.png" alt="" className="h-9 w-auto" />
-          <span className="text-ink text-xl font-bold">{t.appName}</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <Stepper current={step} onStepClick={onStepClick} />
+        <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onToggleAbout}
-              aria-current={view === 'about' ? 'page' : undefined}
-              className={`text-xs font-semibold transition ${
-                view === 'about' ? 'text-ink underline' : 'text-muted hover:text-ink'
-              }`}
-            >
-              {t.about.navLabel}
-            </button>
-            <LanguageSwitcher />
-            {session && (
-              <div className="flex items-center gap-1.5">
-                {username && (
-                  <span className="text-muted hidden text-xs sm:inline">{username}</span>
-                )}
-                <button
-                  type="button"
-                  onClick={signOut}
-                  className="text-muted hover:text-ink text-xs font-semibold transition"
-                >
-                  {t.auth.logout}
-                </button>
-              </div>
-            )}
+            <img src="/tom-logo.png" alt="" className="h-9 w-auto" />
+            <span className="text-ink text-xl font-bold">{t.appName}</span>
           </div>
+          <Stepper current={step} onStepClick={onStepClick} />
+        </div>
+        <div className="flex items-center gap-2">
+          <LanguageSwitcher />
+          {session && (
+            <div className="flex items-center gap-1.5">
+              {username && <span className="text-muted hidden text-xs sm:inline">{username}</span>}
+              <button
+                type="button"
+                onClick={signOut}
+                className="text-muted hover:text-ink text-xs font-semibold transition"
+              >
+                {t.auth.logout}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </header>
   )
 }
 
-function Footer() {
+function Footer({ view, onToggleAbout }) {
   const { t } = useLang()
   return (
     <footer className="border-line mt-12 border-t">
-      <div className="text-muted mx-auto flex max-w-5xl items-center justify-center gap-3 px-6 py-6 text-sm">
+      <div className="text-muted mx-auto flex max-w-5xl flex-wrap items-center justify-center gap-x-3 gap-y-2 px-6 py-6 text-sm">
         <img src="/tom-logo.png" alt="" className="h-6 w-auto" />
         <span>
           {t.footer.projectOf}{' '}
@@ -116,6 +104,19 @@ function Footer() {
             TOM — Tikkun Olam Makers
           </a>
         </span>
+        <span className="text-line" aria-hidden="true">
+          ·
+        </span>
+        <button
+          type="button"
+          onClick={onToggleAbout}
+          aria-current={view === 'about' ? 'page' : undefined}
+          className={`font-semibold transition ${
+            view === 'about' ? 'text-ink underline' : 'hover:text-ink'
+          }`}
+        >
+          {t.about.navLabel}
+        </button>
       </div>
     </footer>
   )
@@ -163,8 +164,6 @@ export default function App() {
             setView('create')
             goTo(n)
           }}
-          view={view}
-          onToggleAbout={() => setView(view === 'about' ? 'create' : 'about')}
         />
         <main className="flex-1">
           {view === 'about' && <About onBack={() => setView('create')} />}
@@ -173,28 +172,25 @@ export default function App() {
             {step === 1 && (
               <BookBuilder book={book} setBook={setBook} onGenerate={() => setStep(2)} />
             )}
-            {step === 2 && (
-              authLoading
-                ? (
-                  <div className="flex min-h-96 items-center justify-center">
-                    <span
-                      className="border-brand-soft border-t-brand inline-block h-10 w-10 animate-spin rounded-full border-4"
-                      aria-label="…"
-                    />
-                  </div>
-                )
-                : session
-                  ? (
-                    <GenerateStep
-                      book={book}
-                      results={results}
-                      setResults={setResults}
-                      onNext={() => setStep(3)}
-                      onBack={() => goTo(1)}
-                    />
-                  )
-                  : <AuthScreen />
-            )}
+            {step === 2 &&
+              (authLoading ? (
+                <div className="flex min-h-96 items-center justify-center">
+                  <span
+                    className="border-brand-soft border-t-brand inline-block h-10 w-10 animate-spin rounded-full border-4"
+                    aria-label="…"
+                  />
+                </div>
+              ) : session ? (
+                <GenerateStep
+                  book={book}
+                  results={results}
+                  setResults={setResults}
+                  onNext={() => setStep(3)}
+                  onBack={() => goTo(1)}
+                />
+              ) : (
+                <AuthScreen />
+              ))}
             {step === 3 && (
               <Suspense
                 fallback={
@@ -211,7 +207,7 @@ export default function App() {
             )}
           </div>
         </main>
-        <Footer />
+        <Footer view={view} onToggleAbout={() => setView(view === 'about' ? 'create' : 'about')} />
       </div>
     </MotionConfig>
   )

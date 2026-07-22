@@ -5,14 +5,35 @@ import { useLang } from '../lib/i18n'
 
 /** The three people who built TOM. Language-neutral, so it lives outside copy.js. */
 const TEAM = [
-  { name: 'Barak Ariely', email: 'barakari07@gmail.com', linkedin: 'https://www.linkedin.com/in/barak-ariely/' },
-  { name: 'Danna Weinzinger', email: 'dusha98@yahoo.com', linkedin: 'https://www.linkedin.com/in/danna-weinzinger-5800aa265/' },
-  { name: 'Noga Yaakov', email: 'nogayaakov03@gmail.com', linkedin: 'https://linkedin.com/in/noga-yaakov-b3270b294' },
+  {
+    name: 'Barak Ariely',
+    email: 'barakari07@gmail.com',
+    linkedin: 'https://www.linkedin.com/in/barak-ariely/',
+  },
+  {
+    name: 'Danna Weinzinger',
+    email: 'dusha98@yahoo.com',
+    linkedin: 'https://www.linkedin.com/in/danna-weinzinger-5800aa265/',
+  },
+  {
+    name: 'Noga Yaakov',
+    email: 'nogayaakov03@gmail.com',
+    linkedin: 'https://linkedin.com/in/noga-yaakov-b3270b294',
+  },
 ]
 
 function MailIcon() {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <rect x="3" y="5" width="18" height="14" rx="2" />
       <path d="m3 7 9 6 9-6" />
     </svg>
@@ -33,10 +54,9 @@ export function About({ onBack }) {
   return (
     <section className="mx-auto max-w-3xl px-6 py-10">
       <img src="/tom-logo-full.png" alt={t.about.logoAlt} className="mx-auto mb-8 h-24 w-auto" />
-      <StepHeading className="text-ink mb-4 text-center text-3xl font-bold">
+      <StepHeading className="text-ink mb-8 text-center text-3xl font-bold">
         {t.about.title}
       </StepHeading>
-      <p className="text-muted mb-8 text-center text-lg">{t.about.intro}</p>
 
       <Card className="mb-6 p-6">
         <h2 className="text-ink mb-2 text-xl font-bold">{t.about.missionTitle}</h2>
