@@ -28,7 +28,10 @@ export function AuthScreen() {
     e.preventDefault()
     setError('')
     const local = validateLocal()
-    if (local) { setError(local); return }
+    if (local) {
+      setError(local)
+      return
+    }
     setBusy(true)
     try {
       const { error: err } = isLogin
@@ -99,7 +102,7 @@ export function AuthScreen() {
         </form>
 
         <p className="text-muted mt-4 text-center text-sm">
-          <button type="button" onClick={switchMode} className="text-accent hover:underline">
+          <button type="button" onClick={switchMode} className="text-accent-text hover:underline">
             {isLogin ? t.auth.toggleToSignup : t.auth.toggleToLogin}
           </button>
         </p>

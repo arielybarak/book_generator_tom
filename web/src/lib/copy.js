@@ -66,6 +66,9 @@ export const COPY = {
       arrowNext: '←', // RTL: forward points left
       arrowPrev: '→',
       viewer: 'תצוגה תלת־ממדית של העמוד — אפשר לסובב',
+      loading: 'טוען…',
+      skipToContent: 'דלגו לתוכן',
+      progress: 'התקדמות',
     },
 
     auth: {
@@ -87,8 +90,6 @@ export const COPY = {
     about: {
       navLabel: 'אודות',
       title: 'אודות הפרויקט',
-      intro:
-        'הכלי הזה הופך משפט קצר לעמוד סיפור שאפשר לגעת בו — ציור בולט, כתב מובלט וברייל, מוכנים להדפסה בתלת־ממד.',
       missionTitle: 'מי אנחנו',
       missionBody:
         'TOM — Tikkun Olam Makers — היא תנועה עולמית של מתנדבים: מפתחים, מעצבים ואנשי מקצוע שנרתמים יחד ליצירת פתרונות לאנשים עם מוגבלויות, ומשתפים אותם בחינם עם כל מי שזקוק להם.',
@@ -169,6 +170,9 @@ export const COPY = {
       arrowNext: '→', // LTR: forward points right
       arrowPrev: '←',
       viewer: '3D preview of the page — you can rotate it',
+      loading: 'Loading…',
+      skipToContent: 'Skip to content',
+      progress: 'Progress',
     },
 
     auth: {
@@ -190,8 +194,6 @@ export const COPY = {
     about: {
       navLabel: 'About',
       title: 'About the project',
-      intro:
-        'This tool turns a short sentence into a story page you can touch — a raised drawing, embossed text and Braille, ready for 3D printing.',
       missionTitle: 'Who we are',
       missionBody:
         'TOM — Tikkun Olam Makers — is a global movement of volunteers: makers, designers and professionals who join forces to create solutions for people with disabilities, and share them freely with anyone who needs them.',

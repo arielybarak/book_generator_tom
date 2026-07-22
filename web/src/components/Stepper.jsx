@@ -8,7 +8,7 @@ import { useLang } from '../lib/i18n'
 export function Stepper({ current, onStepClick }) {
   const { t } = useLang()
   return (
-    <nav aria-label={t.appName} className="flex items-center justify-center gap-1 sm:gap-3">
+    <nav aria-label={t.common.progress} className="flex items-center justify-center gap-1 sm:gap-3">
       {t.steps.map((label, i) => {
         const done = i < current
         const active = i === current
@@ -18,12 +18,16 @@ export function Stepper({ current, onStepClick }) {
           <div key={label} className="flex items-center gap-1 sm:gap-2">
             <Inner
               {...(clickable
-                ? { type: 'button', onClick: () => onStepClick(i), 'aria-label': `${t.common.back}: ${label}` }
-                : {})}
+                ? {
+                    type: 'button',
+                    onClick: () => onStepClick(i),
+                    'aria-label': `${t.common.back}: ${label}`,
+                  }
+                : { 'aria-label': label, 'aria-current': active ? 'step' : undefined })}
               className={`flex items-center gap-1 sm:gap-2 ${clickable ? 'cursor-pointer rounded-full' : ''}`}
             >
               <span
-                aria-current={active ? 'step' : undefined}
+                aria-hidden="true"
                 className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold transition sm:h-8 sm:w-8 sm:text-sm ${
                   done
                     ? 'bg-accent text-white'
@@ -35,6 +39,7 @@ export function Stepper({ current, onStepClick }) {
                 {done ? '✓' : i + 1}
               </span>
               <span
+                aria-hidden="true"
                 className={`hidden text-sm font-medium sm:inline ${
                   active ? 'text-ink' : 'text-muted'
                 }`}

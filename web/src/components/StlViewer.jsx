@@ -37,9 +37,11 @@ export function StlViewer({ url, className = '' }) {
     fill.position.set(-1, -0.5, -1)
     scene.add(fill)
 
+    // Respect users who asked for less motion — three.js rAF is outside CSS/framer reduced-motion.
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
-    controls.autoRotate = true
+    controls.autoRotate = !reduceMotion
     controls.autoRotateSpeed = 1.2
 
     let mesh

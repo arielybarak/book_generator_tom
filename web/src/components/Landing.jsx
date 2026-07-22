@@ -25,7 +25,7 @@ export function Landing({ onStart }) {
           <motion.p
             custom={0}
             variants={fade}
-            className="bg-accent-soft text-accent mb-3 inline-block rounded-full px-4 py-1 text-sm font-semibold"
+            className="bg-accent-soft text-accent-text mb-3 inline-block rounded-full px-4 py-1 text-sm font-semibold"
           >
             {t.tagline}
           </motion.p>

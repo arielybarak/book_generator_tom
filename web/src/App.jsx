@@ -59,11 +59,11 @@ function Header({ step, onStepClick }) {
   const username = session?.user?.email?.split('@')[0] ?? null
   return (
     <header className="border-line bg-paper/80 sticky top-0 z-10 border-b backdrop-blur">
-      <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-4">
-        <div className="flex items-center gap-6">
+      <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-4 sm:gap-4 sm:px-6">
+        <div className="flex items-center gap-3 sm:gap-6">
           <div className="flex items-center gap-2">
             <img src="/tom-logo.png" alt="" className="h-9 w-auto" />
-            <span className="text-ink text-xl font-bold">{t.appName}</span>
+            <span className="text-ink hidden text-xl font-bold sm:inline">{t.appName}</span>
           </div>
           <Stepper current={step} onStepClick={onStepClick} />
         </div>
@@ -99,7 +99,7 @@ function Footer({ view, onToggleAbout }) {
             href="https://tomglobal.org"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-accent font-semibold hover:underline"
+            className="text-accent-text font-semibold hover:underline"
           >
             TOM — Tikkun Olam Makers
           </a>
@@ -123,6 +123,7 @@ function Footer({ view, onToggleAbout }) {
 }
 
 export default function App() {
+  const { t } = useLang()
   const { session, loading: authLoading } = useAuth()
   const saved = loadState()
   const [step, setStep] = useState(saved?.step ?? 0)
@@ -158,6 +159,12 @@ export default function App() {
   return (
     <MotionConfig reducedMotion="user">
       <div className="flex min-h-dvh flex-col">
+        <a
+          href="#main"
+          className="focus:bg-brand focus:rounded-btn sr-only focus:not-sr-only focus:absolute focus:top-2 focus:z-50 focus:px-4 focus:py-2 focus:font-semibold focus:text-white"
+        >
+          {t.common.skipToContent}
+        </a>
         <Header
           step={step}
           onStepClick={(n) => {
@@ -165,7 +172,7 @@ export default function App() {
             goTo(n)
           }}
         />
-        <main className="flex-1">
+        <main id="main" tabIndex={-1} className="flex-1 outline-none">
           {view === 'about' && <About onBack={() => setView('create')} />}
           <div hidden={view === 'about'}>
             {step === 0 && <Landing onStart={() => setStep(1)} />}
@@ -176,8 +183,9 @@ export default function App() {
               (authLoading ? (
                 <div className="flex min-h-96 items-center justify-center">
                   <span
+                    role="status"
                     className="border-brand-soft border-t-brand inline-block h-10 w-10 animate-spin rounded-full border-4"
-                    aria-label="…"
+                    aria-label={t.common.loading}
                   />
                 </div>
               ) : session ? (
@@ -196,8 +204,9 @@ export default function App() {
                 fallback={
                   <div className="flex min-h-96 items-center justify-center">
                     <span
+                      role="status"
                       className="border-brand-soft border-t-brand inline-block h-10 w-10 animate-spin rounded-full border-4"
-                      aria-label="טוען…"
+                      aria-label={t.common.loading}
                     />
                   </div>
                 }

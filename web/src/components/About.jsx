@@ -79,7 +79,7 @@ export function About({ onBack }) {
                 <a
                   href={`mailto:${person.email}`}
                   aria-label={`${t.about.emailLabel}: ${person.name}`}
-                  className="hover:text-accent transition"
+                  className="hover:text-accent-text transition"
                 >
                   <MailIcon />
                 </a>
@@ -88,7 +88,7 @@ export function About({ onBack }) {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label={`LinkedIn: ${person.name}`}
-                  className="hover:text-accent transition"
+                  className="hover:text-accent-text transition"
                 >
                   <LinkedInIcon />
                 </a>
@@ -103,7 +103,7 @@ export function About({ onBack }) {
           href="https://tomglobal.org"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-accent font-semibold hover:underline"
+          className="text-accent-text font-semibold hover:underline"
         >
           {t.about.linkCta}
         </a>
