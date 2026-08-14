@@ -67,7 +67,6 @@ def build_print_friendly_prompt(image_desc: str, object_class: str | None = None
 
 def build_negative_prompt() -> str:
     return PRINT_FRIENDLY_NEGATIVE
-
 def create_images(
     raw_text,
     variations,
@@ -100,32 +99,38 @@ def create_images(
     hebrew_with_nikud = lf.add_nikud(raw_text)
     braille = lf.convert_to_braille(hebrew_with_nikud)
 
-    # Image processing: edge detection → simplification → centering
-    img_np     = np.array(image)
-    gray       = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
-    
-    # Use threshold instead of Canny for cleaner, bolder shapes
-    _, binary  = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
-    
-    # Dilate to thicken lines to minimum printable width (~1.5-2mm)
+    # ── Image processing: edge detection → gap closing → centering ───────────────
+    img_np = np.array(image)
+    gray   = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
+
+    # 1. Threshold (130) ללכידת קווים דקים
+    _, binary = cv2.threshold(gray, 130, 255, cv2.THRESH_BINARY_INV)
+
+    # 2. MORPH_CLOSE אגרסיבי לחיבור רווחים בקווי המתאר
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_close, iterations=2)
+
+    # 3. הרחבה קלה לעובי הדפסה מינימלי
     kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    binary = cv2.dilate(binary, kernel_dilate, iterations=2)
-    
-    # Erode back slightly to clean up rough edges
+    binary = cv2.dilate(binary, kernel_dilate, iterations=1)
+
+    # 4. כיווץ קל להחלקת קצוות
     kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     binary = cv2.erode(binary, kernel_erode, iterations=1)
-    
-    # Remove small noise specks (keep only major shapes)
+
+    # 5. ניקוי רעשים שחורים קטנים (שמירה על רכיבים מעל 30 פיקסלים בלבד)
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
     clean = np.zeros_like(binary)
     for i in range(1, num_labels):
-        if stats[i, cv2.CC_STAT_AREA] >= 200:  # only keep large shapes
+        if stats[i, cv2.CC_STAT_AREA] >= 30:
             clean[labels == i] = 255
-    
+
+    # היפוך לקווים שחורים על רקע לבן
     edges = cv2.bitwise_not(clean)
     h, w  = edges.shape
     edges[h-1:h, w-1:w] = 255
 
+    # צינטור התמונה במרכז הדף
     ys, xs = np.where(edges[1:h-1, 1:w-1] == 0)
     if len(xs) > 0:
         shift_x = int(w / 2 - xs.mean())
@@ -156,7 +161,6 @@ def create_images(
     plt.axis("off")
     plt.savefig(braille_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
     plt.close()
-
 
 def images_to_dxf(image_location, text_location, braille_location):
     """Convert the three PNGs produced by create_images() to DXF files."""
