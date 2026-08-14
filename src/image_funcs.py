@@ -55,20 +55,17 @@ def convert_tensor_to_pil_img(tensor):
 
 # ── Image → DXF ────────────────────────────────────────────────────────────────
 
-def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0):
+def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=0.8):
     """
-    Convert a grayscale/binary image OR image path to a smoother DXF polyline file.
-    Good for tactile / 3D-printable image outlines.
+    Convert a grayscale/binary image OR image path to a smooth, gap-free DXF polyline file.
 
-    Main fixes:
-    - accepts path or numpy array
-    - smooths the binary mask before contour extraction
-    - avoids keeping every pixel stair-step
-    - exports closed continuous contours
+    Fixes applied:
+    - Continuous lines: Morphological closing bridges breaks + reduced simplify_epsilon.
+    - Consistent size/centering: Scaled relative to full PNG canvas size, not dynamic bounding box.
     """
     canvas_mm = canvas_cm * 10.0
 
-    # Accept either path or numpy array
+    # 1. Load image
     if isinstance(image_bw, (str, os.PathLike)):
         img = cv2.imread(str(image_bw), cv2.IMREAD_GRAYSCALE)
         if img is None:
@@ -81,59 +78,54 @@ def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0):
     if img.dtype != np.uint8:
         img = img.astype(np.uint8)
 
-    # We want white object/lines on black background
+    h_orig, w_orig = img.shape[:2]
+
+    # Ensure white object/lines on black background
     if np.mean(img) > 127:
         img = cv2.bitwise_not(img)
 
-    _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
+    _, bin_img = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY)
 
-    # Smooth pixel staircase before contour extraction
-    # Upscaling gives the contour more room to become smooth.
+    # 2. FIX 1: Close gaps to guarantee unbroken continuous lines
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, kernel_close, iterations=2)
+
+    # Upscale for smooth anti-aliased contour extraction
     upscale = 4
     bin_img = cv2.resize(
         bin_img,
-        None,
-        fx=upscale,
-        fy=upscale,
+        (w_orig * upscale, h_orig * upscale),
         interpolation=cv2.INTER_CUBIC,
     )
 
-    # Blur + threshold removes jagged pixel steps
+    # Blur + threshold removes staircase steps
     bin_img = cv2.GaussianBlur(bin_img, (5, 5), 0)
     _, bin_img = cv2.threshold(bin_img, 127, 255, cv2.THRESH_BINARY)
 
-    # Close tiny gaps and smooth corners
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, kernel, iterations=1)
-    bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, kernel, iterations=1)
-
-    # Use TC89 instead of CHAIN_APPROX_NONE to avoid exporting every pixel step
+    # Extract contours
     contours, _ = cv2.findContours(
         bin_img,
         cv2.RETR_EXTERNAL,
         cv2.CHAIN_APPROX_TC89_KCOS,
     )
 
-    contours = [c for c in contours if cv2.contourArea(c) >= 100 * upscale * upscale]
+    contours = [c for c in contours if cv2.contourArea(c) >= 50 * upscale * upscale]
     if not contours:
         print(f"Warning: no significant contours for {out_path}")
         return
 
-    all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
-    min_x, min_y = all_pts.min(axis=0)
-    max_x, max_y = all_pts.max(axis=0)
+    # 3. FIX 2: Fixed canvas scaling (consistent size & centering)
+    full_w_px = w_orig * upscale
+    full_h_px = h_orig * upscale
 
-    w_px = max_x - min_x + 1
-    h_px = max_y - min_y + 1
-
-    scale = canvas_mm / max(w_px, h_px)
-    offset_x = (canvas_mm - w_px * scale) / 2
-    offset_y = (canvas_mm - h_px * scale) / 2
+    scale = canvas_mm / max(full_w_px, full_h_px)
+    offset_x = (canvas_mm - full_w_px * scale) / 2
+    offset_y = (canvas_mm - full_h_px * scale) / 2
 
     def px_to_mm(p):
         return (
-            (p[0] - min_x) * scale + offset_x,
-            (max_y - p[1]) * scale + offset_y,
+            p[0] * scale + offset_x,
+            (full_h_px - p[1]) * scale + offset_y,
         )
 
     doc = ezdxf.new(setup=True)
@@ -141,10 +133,8 @@ def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0):
     msp = doc.modelspace()
 
     for c in contours:
-        # epsilon is multiplied because we upscaled the image
         epsilon = simplify_epsilon * upscale
         approx = cv2.approxPolyDP(c, epsilon=epsilon, closed=True)
-
         pts = [px_to_mm(p[0]) for p in approx]
 
         if len(pts) > 2:
@@ -185,44 +175,52 @@ def process_image_to_dxf(img_array, output_path, canvas_cm=150):
     doc.saveas(output_path)
 
 
-def png_to_dxf(png_path, dxf_path, canvas_cm=150):
-    """Convert a PNG file to a DXF using external contour extraction."""
+def png_to_dxf(png_path, dxf_path, canvas_cm=150, simplify_epsilon=0.8):
+    """Convert a PNG file to a DXF using fixed canvas scaling and gap closing."""
     canvas_mm = canvas_cm * 10.0
 
-    img = cv2.imread(png_path, cv2.IMREAD_GRAYSCALE)
+    img = cv2.imread(str(png_path), cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise RuntimeError(f"Could not load {png_path}")
 
-    _, bw = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY_INV)
-    contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    h_orig, w_orig = img.shape[:2]
+
+    if np.mean(img) > 127:
+        img = cv2.bitwise_not(img)
+
+    _, bw = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY)
+
+    # Close micro gaps in lines
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
     if not contours:
-        raise RuntimeError(f"No contours found in {png_path}")
+        print(f"Warning: No contours found in {png_path}")
+        return
 
-    all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
-    min_x, min_y = all_pts.min(axis=0)
-    max_x, max_y = all_pts.max(axis=0)
-    w_px = max_x - min_x + 1
-    h_px = max_y - min_y + 1
-
-    scale    = canvas_mm / max(w_px, h_px)
-    offset_x = (canvas_mm - w_px * scale) / 2
-    offset_y = (canvas_mm - h_px * scale) / 2
+    # Fixed scale based on total frame dimensions
+    scale = canvas_mm / max(w_orig, h_orig)
+    offset_x = (canvas_mm - w_orig * scale) / 2
+    offset_y = (canvas_mm - h_orig * scale) / 2
 
     def px_to_mm(p):
-        return ((p[0] - min_x) * scale + offset_x,
-                (max_y - p[1]) * scale + offset_y)
+        return (
+            p[0] * scale + offset_x,
+            (h_orig - p[1]) * scale + offset_y,
+        )
 
     doc = ezdxf.new(setup=True)
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
 
     for c in contours:
-        pts = [px_to_mm(p[0]) for p in c]
+        approx = cv2.approxPolyDP(c, epsilon=simplify_epsilon, closed=True)
+        pts = [px_to_mm(p[0]) for p in approx]
         if len(pts) > 1:
-            msp.add_lwpolyline(pts, close=True)
+            msp.add_lwpolyline(pts, close=True, dxfattribs={'color': 7})
 
     doc.saveas(dxf_path)
-
 
 def _filled_glyphs_to_dxf(image_bw, out_path, canvas_cm=150):
     """
