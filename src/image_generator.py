@@ -148,7 +148,11 @@ def create_images(
     plt.figure(figsize=(5, 5))
     plt.gca().set_facecolor("white")
     display_text = hebrew_with_nikud[::-1] if hebrew_with_nikud else ""
-    plt.text(0.5, 0.1, display_text, fontsize=20, color='black',
+    base_size = 20
+    # אם הטקסט ארוך מ-5 אותיות, הפונט יוקטן בהתאם
+    dynamic_fontsize = max(14, base_size - max(0, len(display_text) - 5) * 2)
+
+    plt.text(0.5, 0.1, display_text, fontsize=dynamic_fontsize, color='black',
              ha='center', va='center', fontweight='light', fontname='DejaVu Sans')
     plt.axis("off")
     plt.savefig(text_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
