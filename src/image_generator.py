@@ -5,15 +5,9 @@ Responsibilities:
 - _get_pipeline(): lazy singleton that loads the SD model once (segmind/SSD-1B)
 - create_images(): full single-page pipeline — translates Hebrew, runs SD, applies
   edge detection + centering, saves image PNG, Hebrew text PNG, and Braille PNG.
-  Uses add_nikud() which calls input() — CLI-only, not suitable for web context.
 - images_to_dxf(): converts the three PNGs produced by create_images() to DXF files.
-
-Note: the deployed HF Space (hf_space/gradio_app_lithophane.py) has its own SD
-pipeline and does NOT import this module — only FlowManager/CLI does. Therefore
-editing THIS file does NOT require ./sync_to_space.sh or a Space redeploy; you can
-ignore the sync-guard reminder when only this file changed. (Any sync-guard nag
-is a false alarm here.)
 """
+
 import torch
 import cv2
 import numpy as np
@@ -67,6 +61,7 @@ def build_print_friendly_prompt(image_desc: str, object_class: str | None = None
 
 def build_negative_prompt() -> str:
     return PRINT_FRIENDLY_NEGATIVE
+
 def create_images(
     raw_text,
     variations,
@@ -76,7 +71,7 @@ def create_images(
 ):
     """
     Full single-page pipeline (CLI / FlowManager use).
-    Calls add_nikud() which uses interactive input() — not suitable for web context.
+    Safely attempts nikud addition without crashing web / non-interactive contexts.
     """
     imf.ensure_font()
 
@@ -95,42 +90,46 @@ def create_images(
         guidance_scale=sd_cfg["guidance_scale"],
     ).images[0]
 
-    # Braille conversion (requires interactive nikud input)
-    hebrew_with_nikud = lf.add_nikud(raw_text)
+    # ניסיון הוספת ניקוד עם מנגנון הגנה מקריסות
+    try:
+        hebrew_with_nikud = lf.add_nikud(raw_text)
+    except (EOFError, Exception):
+        hebrew_with_nikud = raw_text
+
     braille = lf.convert_to_braille(hebrew_with_nikud)
 
-    # ── Image processing: edge detection → gap closing → centering ───────────────
+    # ── עיבוד התמונה: סף דק, סגירת רווחים וצינטור ─────────────────────────
     img_np = np.array(image)
     gray   = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
 
-    # 1. Threshold (130) ללכידת קווים דקים
+    # 1. Threshold נמוך יותר ללכידת קווים דקים
     _, binary = cv2.threshold(gray, 130, 255, cv2.THRESH_BINARY_INV)
 
-    # 2. MORPH_CLOSE אגרסיבי לחיבור רווחים בקווי המתאר
+    # 2. חיבור רווחים בקווי המתאר
     kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_close, iterations=2)
 
-    # 3. הרחבה קלה לעובי הדפסה מינימלי
+    # 3. הרחבה קלה לעובי הדפסה
     kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     binary = cv2.dilate(binary, kernel_dilate, iterations=1)
 
-    # 4. כיווץ קל להחלקת קצוות
+    # 4. החלקת קצוות
     kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     binary = cv2.erode(binary, kernel_erode, iterations=1)
 
-    # 5. ניקוי רעשים שחורים קטנים (שמירה על רכיבים מעל 30 פיקסלים בלבד)
+    # 5. ניקוי רעשים זעירים בלבד (שמירה על רכיבים מעל 30 פיקסלים)
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
     clean = np.zeros_like(binary)
     for i in range(1, num_labels):
         if stats[i, cv2.CC_STAT_AREA] >= 30:
             clean[labels == i] = 255
 
-    # היפוך לקווים שחורים על רקע לבן
+    # היפוך חזרה לקווים שחורים על רקע לבן
     edges = cv2.bitwise_not(clean)
     h, w  = edges.shape
     edges[h-1:h, w-1:w] = 255
 
-    # צינטור התמונה במרכז הדף
+    # צינטור התמונה
     ys, xs = np.where(edges[1:h-1, 1:w-1] == 0)
     if len(xs) > 0:
         shift_x = int(w / 2 - xs.mean())
@@ -141,19 +140,20 @@ def create_images(
         edges, np.float32([[1, 0, shift_x], [0, 1, shift_y]]), (w, h), borderValue=255
     )
 
-    # Save image PNG
+    # שמירת תמונת ה-PNG
     cv2.imwrite(str(image_output_location), centered)
 
-    # Save Hebrew text PNG
+    # שמירת טקסט בעברית PNG
     plt.figure(figsize=(5, 5))
     plt.gca().set_facecolor("white")
-    plt.text(0.5, 0.9, hebrew_with_nikud[::-1], fontsize=30, color='black',
+    display_text = hebrew_with_nikud[::-1] if hebrew_with_nikud else ""
+    plt.text(0.5, 0.9, display_text, fontsize=30, color='black',
              ha='center', va='center', fontweight='light', fontname='DejaVu Sans')
     plt.axis("off")
     plt.savefig(text_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
     plt.close()
 
-    # Save Braille PNG
+    # שמירת ברייל PNG
     plt.figure(figsize=(5, 5))
     plt.gca().set_facecolor("white")
     plt.text(0.5, 0.1, braille, fontsize=30, color='black',
@@ -161,6 +161,7 @@ def create_images(
     plt.axis("off")
     plt.savefig(braille_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
     plt.close()
+
 
 def images_to_dxf(image_location, text_location, braille_location):
     """Convert the three PNGs produced by create_images() to DXF files."""
