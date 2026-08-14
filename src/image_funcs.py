@@ -158,8 +158,8 @@ def process_image_to_dxf(img_array, output_path, canvas_cm=150):
 
 def png_to_dxf(png_path, dxf_path, canvas_cm=150):
     """
-    ממירה PNG ל-DXF בדיוק מוחלט של 1:1 לפיקסלים של ה-PNG.
-    שומרת על כל הפרטים הפנימיים, ללא החלקה, ללא טשטוש וללא עיוות פינות.
+    ממירה PNG ל-DXF חלק, עגול ורציף ללא זיגזגים וללא שברים בקו.
+    משתמשת בהגדלת קנה מידה עדינה ואיחוי מורפולוגי לתוצאת 3D מושלמת.
     """
     canvas_mm = canvas_cm * 10.0
 
@@ -169,30 +169,42 @@ def png_to_dxf(png_path, dxf_path, canvas_cm=150):
 
     h, w = img.shape
 
-    # המרה לבינארי: זהות מוחלטת לשחור/לבן
+    # 1. המרה לבינארי
     if np.mean(img) > 127:
         _, bw = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY_INV)
     else:
         _, bw = cv2.threshold(img, 50, 255, cv2.THRESH_BINARY)
 
-    # חילוץ כל קווי המעטפת (חורים, קווים פנימיים וחיצוניים) ללא השמטת פיקסלים
-    contours, _ = cv2.findContours(bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+    # 2. איחוי שברים וחיבור סדקים בקו (Morphological Close)
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, kernel_close, iterations=2)
+    bw = cv2.dilate(bw, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1)
+
+    # 3. ביטול זיגזגים: הגדלה (Upscale) + טשטוש להחלקת מדרגות הפיקסלים
+    scale_factor = 4
+    bw_large = cv2.resize(bw, (w * scale_factor, h * scale_factor), interpolation=cv2.INTER_CUBIC)
+    bw_large = cv2.GaussianBlur(bw_large, (7, 7), 0)
+    _, bw_smooth = cv2.threshold(bw_large, 127, 255, cv2.THRESH_BINARY)
+
+    # 4. חילוץ קווי המעטפת המוחלקים
+    contours, _ = cv2.findContours(bw_smooth, cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_KCOS)
     if not contours:
         raise RuntimeError(f"No contours found in {png_path}")
 
-    # סינון מסגרת חיצונית אם ה-Threshold תפס את כל גבול התמונה
+    # 5. סינון מסגרות רקע ורעשים
     filtered_contours = []
+    full_area = (w * scale_factor) * (h * scale_factor)
     for c in contours:
         area = cv2.contourArea(c)
-        if area > (w * h * 0.98):  # מתעלם ממסגרת הקנבס ההיקפית
+        if area > (full_area * 0.98):  # מתעלם ממסגרת הקנבס ההיקפית
             continue
-        if area >= 2:  # מסנן נקודות רעש מיקרוסקופיות בלבד
+        if area >= (15 * scale_factor * scale_factor):  # מסנן נקודות רעש מיקרוסקופיות
             filtered_contours.append(c)
 
     if not filtered_contours:
         filtered_contours = contours
 
-    # חישוב קנה מידה וצינטור מול הלוח (במילימטרים)
+    # 6. חישוב קנה מידה וצינטור מול הלוח (במילימטרים)
     all_pts = np.vstack([c.reshape(-1, 2) for c in filtered_contours])
     min_x, min_y = all_pts.min(axis=0)
     max_x, max_y = all_pts.max(axis=0)
@@ -204,7 +216,6 @@ def png_to_dxf(png_path, dxf_path, canvas_cm=150):
     offset_y = (canvas_mm - h_px * scale) / 2
 
     def px_to_mm(p):
-        # המרת קואורדינטות פיקסלים למילימטרים (עם היפוך ציר Y של תמונה)
         return (
             (p[0] - min_x) * scale + offset_x,
             (max_y - p[1]) * scale + offset_y
@@ -214,14 +225,15 @@ def png_to_dxf(png_path, dxf_path, canvas_cm=150):
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
 
-    # יצירת הקווים ב-DXF ישירות מכל נקודות הפיקסל המקוריות
+    # 7. פישוט עדין שמנוע קצוות חדים ושומר על קימורים עגולים
     for c in filtered_contours:
-        pts = [px_to_mm(p[0]) for p in c]
+        epsilon = 0.8 * scale_factor  # פישוט מבוקר שמונע זיגזגים
+        approx = cv2.approxPolyDP(c, epsilon=epsilon, closed=True)
+        pts = [px_to_mm(p[0]) for p in approx]
         if len(pts) > 2:
             msp.add_lwpolyline(pts, close=True, dxfattribs={'color': 7})
 
     doc.saveas(dxf_path)
-
 
 def _filled_glyphs_to_dxf(image_bw, out_path, canvas_cm=150):
     """
