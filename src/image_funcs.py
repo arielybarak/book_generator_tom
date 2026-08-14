@@ -157,19 +157,43 @@ def process_image_to_dxf(img_array, output_path, canvas_cm=150):
 
 
 def png_to_dxf(png_path, dxf_path, canvas_cm=150):
-    """Convert a PNG file to a DXF preserving inner holes and details."""
+    """
+    ממירה PNG ל-DXF בדיוק מוחלט של 1:1 לפיקסלים של ה-PNG.
+    שומרת על כל הפרטים הפנימיים, ללא החלקה, ללא טשטוש וללא עיוות פינות.
+    """
     canvas_mm = canvas_cm * 10.0
 
     img = cv2.imread(png_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise RuntimeError(f"Could not load {png_path}")
 
-    _, bw = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY_INV)
+    h, w = img.shape
+
+    # המרה לבינארי: זהות מוחלטת לשחור/לבן
+    if np.mean(img) > 127:
+        _, bw = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY_INV)
+    else:
+        _, bw = cv2.threshold(img, 50, 255, cv2.THRESH_BINARY)
+
+    # חילוץ כל קווי המעטפת (חורים, קווים פנימיים וחיצוניים) ללא השמטת פיקסלים
     contours, _ = cv2.findContours(bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
     if not contours:
         raise RuntimeError(f"No contours found in {png_path}")
 
-    all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
+    # סינון מסגרת חיצונית אם ה-Threshold תפס את כל גבול התמונה
+    filtered_contours = []
+    for c in contours:
+        area = cv2.contourArea(c)
+        if area > (w * h * 0.98):  # מתעלם ממסגרת הקנבס ההיקפית
+            continue
+        if area >= 2:  # מסנן נקודות רעש מיקרוסקופיות בלבד
+            filtered_contours.append(c)
+
+    if not filtered_contours:
+        filtered_contours = contours
+
+    # חישוב קנה מידה וצינטור מול הלוח (במילימטרים)
+    all_pts = np.vstack([c.reshape(-1, 2) for c in filtered_contours])
     min_x, min_y = all_pts.min(axis=0)
     max_x, max_y = all_pts.max(axis=0)
     w_px = max_x - min_x + 1
@@ -180,6 +204,7 @@ def png_to_dxf(png_path, dxf_path, canvas_cm=150):
     offset_y = (canvas_mm - h_px * scale) / 2
 
     def px_to_mm(p):
+        # המרת קואורדינטות פיקסלים למילימטרים (עם היפוך ציר Y של תמונה)
         return (
             (p[0] - min_x) * scale + offset_x,
             (max_y - p[1]) * scale + offset_y
@@ -189,10 +214,11 @@ def png_to_dxf(png_path, dxf_path, canvas_cm=150):
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
 
-    for c in contours:
+    # יצירת הקווים ב-DXF ישירות מכל נקודות הפיקסל המקוריות
+    for c in filtered_contours:
         pts = [px_to_mm(p[0]) for p in c]
-        if len(pts) > 1:
-            msp.add_lwpolyline(pts, close=True)
+        if len(pts) > 2:
+            msp.add_lwpolyline(pts, close=True, dxfattribs={'color': 7})
 
     doc.saveas(dxf_path)
 

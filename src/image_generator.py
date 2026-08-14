@@ -49,7 +49,8 @@ PRINT_FRIENDLY_NEGATIVE = (
     "photorealistic, complex background, decorative, small details, "
     "thin lines, clutter, noise, realistic lighting, busy composition, "
     "interior detail, internal lines, patterns, perspective, 3D effect, "
-    "shadows, highlights, multiple objects"
+    "shadows, highlights, multiple objects, "
+    "face, eyes, mouth, person, human features, anthropomorphic, character"
 )
 
 def build_print_friendly_prompt(image_desc: str, object_class: str | None = None) -> str:
