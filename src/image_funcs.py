@@ -57,12 +57,11 @@ def convert_tensor_to_pil_img(tensor):
 
 def image_to_dxf_exact(image_bw, out_path, canvas_cm=150):
     """
-    Convert image/PNG directly to DXF with near 1:1 fidelity to the PNG.
-    Preserves fine details and inner contours without heavy distortion.
+    Convert PNG line art to DXF keeping ALL inner details (eyes, nose, inner lines)
+    with smooth curves and no broken/polygonized edges.
     """
     canvas_mm = canvas_cm * 10.0
 
-    # 1. טעינת התמונה
     if isinstance(image_bw, (str, os.PathLike)):
         img = cv2.imread(str(image_bw), cv2.IMREAD_GRAYSCALE)
         if img is None:
@@ -77,21 +76,19 @@ def image_to_dxf_exact(image_bw, out_path, canvas_cm=150):
 
     h_orig, w_orig = img.shape[:2]
 
-    # דאגה לכך שהרקע יהיה שחור והקווים/צורות יהיו לבנים
+    # הפיכה לקווים לבנים על רקע שחור
     if np.mean(img) > 127:
         img = cv2.bitwise_not(img)
 
-    # 2. הפיכה לתמונה בינארית מדויקת
-    _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
+    _, bin_img = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY)
 
-    # 3. חילוץ כל קווי המתאר (גם חיצוניים וגם פנימיים - RETR_CCOMP)
-    contours, _ = cv2.findContours(bin_img, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_KCOS)
+    # 1. RETR_TREE מחלץ את כל הקווים והפרטים הפנימיים (עיניים, אף, קווי גוף)
+    contours, _ = cv2.findContours(bin_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
 
     if not contours:
         print(f"Warning: no contours found for {out_path}")
         return
 
-    # חישוב קנה מידה מדויק לפי גודל ה-PNG המקורי
     scale = canvas_mm / max(w_orig, h_orig)
     offset_x = (canvas_mm - w_orig * scale) / 2
     offset_y = (canvas_mm - h_orig * scale) / 2
@@ -106,13 +103,13 @@ def image_to_dxf_exact(image_bw, out_path, canvas_cm=150):
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
 
-    # 4. המרה ל-DXF ברמת דיוק גבוהה (epsilon = 0.4 פיקסלים בלבד)
     for c in contours:
-        if cv2.contourArea(c) < 10:  # התעלמות מרעשים זעירים בלבד
+        # סינון רעשים זעירים בלבד
+        if cv2.contourArea(c) < 5:
             continue
 
-        # פישוט מזערי כדי לשמור על הצורה המקורית של ה-PNG
-        approx = cv2.approxPolyDP(c, epsilon=0.4, closed=True)
+        # 2. epsilon נמוך (0.5) שומר על קימורים רכים ומונע קווים מצולעים/מקוטעים
+        approx = cv2.approxPolyDP(c, epsilon=0.5, closed=True)
         pts = [px_to_mm(p[0]) for p in approx]
 
         if len(pts) > 2:
