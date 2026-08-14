@@ -21,11 +21,27 @@ async function downloadStl(url, filename) {
 }
 
 /**
+ * Filesystem-safe STL filename from the page's own text: strip nikud marks,
+ * first 3 words, keep letters/digits/_/- (Hebrew is valid in filenames),
+ * append page number for uniqueness. Empty text -> page_N.stl.
+ */
+function pageFilename(text, pageNo) {
+  const slug = (text || '')
+    .replace(/[֑-ׇ]/g, '') // nikud + cantillation combining marks
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 3)
+    .join('_')
+    .replace(/[^\p{L}\p{N}_-]+/gu, '')
+    .slice(0, 40)
+  return slug ? `${slug}_${pageNo}.stl` : `page_${pageNo}.stl`
+}
+
+/**
  * Step 4 — preview each finished page in 3D and download its printable STL.
  */
 export default function DownloadStep({ book, results, onRestart }) {
   const { t } = useLang()
-  const safeTitle = (book.title || 'page').replace(/\s+/g, '_')
 
   return (
     <section className="mx-auto max-w-4xl px-6 py-10">
@@ -37,16 +53,18 @@ export default function DownloadStep({ book, results, onRestart }) {
           const res = results[p.id]
           if (!res?.stlUrl) return null
           return (
-            <Card key={p.id} className="grid gap-4 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
-              <StlViewer url={res.stlUrl} className="h-64 w-full" />
-              <div className="text-center sm:px-6 sm:text-start">
-                <p className="text-muted mb-1 text-sm">
-                  {t.generate.page} {i + 1} {t.common.of} {book.pages.length}
-                </p>
-                <p className="text-ink mb-4 font-semibold">{p.text}</p>
+            <Card key={p.id} className="p-4">
+              <StlViewer url={res.stlUrl} className="h-80 w-full sm:h-96" />
+              <div className="mt-4 flex flex-col items-center gap-4 text-center sm:flex-row sm:justify-between sm:text-start">
+                <div>
+                  <p className="text-muted mb-1 text-sm">
+                    {t.generate.page} {i + 1} {t.common.of} {book.pages.length}
+                  </p>
+                  <p className="text-ink font-semibold">{p.text}</p>
+                </div>
                 <button
-                  onClick={() => downloadStl(res.stlUrl, `${safeTitle}_${i + 1}.stl`)}
-                  className="rounded-btn bg-brand shadow-soft hover:bg-brand-dark inline-flex items-center justify-center gap-2 px-6 py-3 font-semibold text-white transition"
+                  onClick={() => downloadStl(res.stlUrl, pageFilename(p.text, i + 1))}
+                  className="rounded-btn bg-brand shadow-soft hover:bg-brand-dark inline-flex shrink-0 items-center justify-center gap-2 px-6 py-3 font-semibold text-white transition"
                 >
                   <span aria-hidden="true">⬇</span> {t.download.download}
                 </button>

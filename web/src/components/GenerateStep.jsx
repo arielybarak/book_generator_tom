@@ -110,7 +110,7 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
                     className="text-muted ms-auto shrink-0 font-mono text-sm tabular-nums"
                     title={t.generate.elapsed}
                   >
-                    ⏱ {fmtElapsed(timers[p.id], now, t.common.sec)}
+                    <span aria-hidden="true">⏱</span> {fmtElapsed(timers[p.id], now, t.common.sec)}
                   </span>
                 )}
               </div>
@@ -128,7 +128,11 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
                   <div className="text-center">
                     <Spinner />
                     <p className="text-muted mt-3 text-sm">
-                      {st === 'waking' ? t.generate.waking : st === 'queued' ? t.generate.waking : t.generate.working}
+                      {st === 'waking'
+                        ? t.generate.waking
+                        : st === 'queued'
+                          ? t.generate.waking
+                          : t.generate.working}
                     </p>
                   </div>
                 )}

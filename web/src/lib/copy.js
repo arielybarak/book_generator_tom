@@ -14,7 +14,6 @@ export const COPY = {
       headline: 'הופכים משפט לעמוד שאפשר לגעת בו',
       sub: 'כותבים משפט בעברית, מתארים את הציור — ומקבלים עמוד מוכן להדפסה בתלת־ממד, עם ציור בולט, טקסט וברייל. בלי שום ידע טכני.',
       cta: 'בואו ניצור ספר',
-      note: 'מתאים להורים, גננות וכל מי שרוצה לספר סיפור במגע.',
       galleryTitle: 'כך נראה עמוד גמור',
     },
 
@@ -66,6 +65,9 @@ export const COPY = {
       arrowNext: '←', // RTL: forward points left
       arrowPrev: '→',
       viewer: 'תצוגה תלת־ממדית של העמוד — אפשר לסובב',
+      loading: 'טוען…',
+      skipToContent: 'דלגו לתוכן',
+      progress: 'התקדמות',
     },
 
     auth: {
@@ -84,6 +86,22 @@ export const COPY = {
       errorPassword: 'הסיסמה חייבת להכיל לפחות 6 תווים',
     },
 
+    about: {
+      navLabel: 'אודות',
+      title: 'אודות הפרויקט',
+      missionTitle: 'מי אנחנו',
+      missionBody:
+        'TOM — Tikkun Olam Makers — היא תנועה עולמית של מתנדבים: מפתחים, מעצבים ואנשי מקצוע שנרתמים יחד ליצירת פתרונות לאנשים עם מוגבלויות, ומשתפים אותם בחינם עם כל מי שזקוק להם.',
+      eliyaTitle: 'הסיפור שלנו',
+      eliyaBody:
+        'הפרויקט נוצר יחד עם עמותת אלי״ה, התומכת בילדים עיוורים ולקויי ראייה בישראל, מתוך רצון פשוט: שכל הורה יוכל להכין לילד שלו ספר שקוראים בידיים. כותבים משפט, מתארים ציור — ומקבלים עמוד מוחשי שאפשר להדפיס בבית או במעבדת הדפסה.',
+      linkCta: 'לאתר TOM — Tikkun Olam Makers',
+      logoAlt: 'TOM — Tikkun Olam Makers',
+      teamTitle: 'הצוות',
+      emailLabel: 'אימייל',
+      back: 'חזרה ליצירת הספר',
+    },
+
     footer: {
       projectOf: 'פרויקט של',
     },
@@ -99,7 +117,6 @@ export const COPY = {
       headline: 'Turn a sentence into a page you can touch',
       sub: 'Write a sentence, describe the picture — and get a 3D-printable page with a raised drawing, text and Braille. No technical knowledge needed.',
       cta: 'Let’s make a book',
-      note: 'For parents, teachers and anyone who wants to tell a story by touch.',
       galleryTitle: 'This is what a finished page looks like',
     },
 
@@ -151,6 +168,9 @@ export const COPY = {
       arrowNext: '→', // LTR: forward points right
       arrowPrev: '←',
       viewer: '3D preview of the page — you can rotate it',
+      loading: 'Loading…',
+      skipToContent: 'Skip to content',
+      progress: 'Progress',
     },
 
     auth: {
@@ -167,6 +187,22 @@ export const COPY = {
       errorSignup: 'Sign-up failed. That username may already be taken',
       errorUsername: 'Username must be at least 3 characters (letters, digits, _ . -)',
       errorPassword: 'Password must be at least 6 characters',
+    },
+
+    about: {
+      navLabel: 'About',
+      title: 'About the project',
+      missionTitle: 'Who we are',
+      missionBody:
+        'TOM — Tikkun Olam Makers — is a global movement of volunteers: makers, designers and professionals who join forces to create solutions for people with disabilities, and share them freely with anyone who needs them.',
+      eliyaTitle: 'Our story',
+      eliyaBody:
+        'The project was created together with Eliya, an Israeli organization supporting blind and visually-impaired children, out of a simple wish: that every parent could make their child a book that is read with the hands. Write a sentence, describe a picture — and get a tactile page you can print at home or at a printing lab.',
+      linkCta: 'Visit TOM — Tikkun Olam Makers',
+      logoAlt: 'TOM — Tikkun Olam Makers',
+      teamTitle: 'The team',
+      emailLabel: 'Email',
+      back: 'Back to your book',
     },
 
     footer: {

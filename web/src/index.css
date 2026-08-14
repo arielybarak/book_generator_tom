@@ -10,7 +10,7 @@
   --color-paper: #fffbf5; /* warm page background */
   --color-surface: #ffffff; /* cards */
   --color-ink: #1f2937; /* primary text */
-  --color-muted: #6b7280; /* secondary text */
+  --color-muted: #5b6270; /* secondary text (nudged darker → AA on warm tints) */
   --color-line: #f0e7dc; /* hairline borders on paper */
 
   /* brand — warm, friendly orange (primary actions) */
@@ -18,9 +18,10 @@
   --color-brand-dark: #c2410c; /* hover / active */
   --color-brand-soft: #fff1e6; /* tinted backgrounds */
 
-  /* accent — calm teal (secondary, focus rings) */
+  /* accent — calm teal (secondary, focus rings, large fills) */
   --color-accent: #0d9488;
   --color-accent-soft: #e6fbf8;
+  --color-accent-text: #115e59; /* darker teal for teal *text* / links → AA 4.5:1 (fills keep --color-accent) */
 
   --radius-card: 1.5rem;
   --radius-btn: 9999px;

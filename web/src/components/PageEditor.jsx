@@ -56,7 +56,7 @@ export function PageEditor({ onAdd }) {
             type="button"
             onClick={() => setShowNikud((s) => !s)}
             aria-expanded={showNikud}
-            className="text-accent text-sm font-semibold hover:underline"
+            className="text-accent-text text-sm font-semibold hover:underline"
           >
             {showNikud ? '▾ ' : '▸ '}
             {t.builder.soundQuestion} ({choices.length})

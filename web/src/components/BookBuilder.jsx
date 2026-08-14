@@ -74,7 +74,11 @@ export function BookBuilder({ book, setBook, onGenerate }) {
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-ink truncate font-semibold">{p.text}</p>
-                    {p.picture && <p className="text-muted truncate text-sm">🖼 {p.picture}</p>}
+                    {p.picture && (
+                      <p className="text-muted truncate text-sm">
+                        <span aria-hidden="true">🖼</span> {p.picture}
+                      </p>
+                    )}
                   </div>
                   <button
                     type="button"
