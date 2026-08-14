@@ -100,35 +100,30 @@ def create_images(
     braille = lf.convert_to_braille(hebrew_with_nikud)
 
     # ── עיבוד התמונה: סף דק, סגירת רווחים וצינטור ─────────────────────────
+    # עיבוד התמונה ב-PNG: סף, איחוי חורים עדין וצינטור
     img_np = np.array(image)
-    gray   = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
 
-    # 1. Threshold נמוך יותר ללכידת קווים דקים
-    _, binary = cv2.threshold(gray, 130, 255, cv2.THRESH_BINARY_INV)
+    _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
 
-    # 2. חיבור רווחים בקווי המתאר
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    # 1. איחוי וסגירת מרווחים בקו לפני סינון הרעשים!
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_close, iterations=2)
 
-    # 3. הרחבה קלה לעובי הדפסה
+    # 2. הרחבה לעובי קו הדפסה
     kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     binary = cv2.dilate(binary, kernel_dilate, iterations=1)
 
-    # 4. החלקת קצוות
-    kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    binary = cv2.erode(binary, kernel_erode, iterations=1)
-
-    # 5. ניקוי רעשים זעירים בלבד (שמירה על רכיבים מעל 30 פיקסלים)
+    # 3. ניקוי רעשים עדין ביותר (שמירה על רכיבים מעל 30 פיקסלים בלבד במקום 200)
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
     clean = np.zeros_like(binary)
     for i in range(1, num_labels):
         if stats[i, cv2.CC_STAT_AREA] >= 30:
             clean[labels == i] = 255
 
-    # היפוך חזרה לקווים שחורים על רקע לבן
     edges = cv2.bitwise_not(clean)
-    h, w  = edges.shape
-    edges[h-1:h, w-1:w] = 255
+    h, w = edges.shape
+    edges[h - 1:h, w - 1:w] = 255
 
     # צינטור התמונה
     ys, xs = np.where(edges[1:h-1, 1:w-1] == 0)
