@@ -55,17 +55,14 @@ def convert_tensor_to_pil_img(tensor):
 
 # ── Image → DXF ────────────────────────────────────────────────────────────────
 
-def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=0.8):
+def image_to_dxf_exact(image_bw, out_path, canvas_cm=150):
     """
-    Convert a grayscale/binary image OR image path to a smooth, gap-free DXF polyline file.
-
-    Fixes applied:
-    - Continuous lines: Morphological closing bridges breaks + reduced simplify_epsilon.
-    - Consistent size/centering: Scaled relative to full PNG canvas size, not dynamic bounding box.
+    Convert image/PNG directly to DXF with near 1:1 fidelity to the PNG.
+    Preserves fine details and inner contours without heavy distortion.
     """
     canvas_mm = canvas_cm * 10.0
 
-    # 1. Load image
+    # 1. טעינת התמונה
     if isinstance(image_bw, (str, os.PathLike)):
         img = cv2.imread(str(image_bw), cv2.IMREAD_GRAYSCALE)
         if img is None:
@@ -80,61 +77,42 @@ def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=0.8):
 
     h_orig, w_orig = img.shape[:2]
 
-    # Ensure white object/lines on black background
+    # דאגה לכך שהרקע יהיה שחור והקווים/צורות יהיו לבנים
     if np.mean(img) > 127:
         img = cv2.bitwise_not(img)
 
-    _, bin_img = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY)
+    # 2. הפיכה לתמונה בינארית מדויקת
+    _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
 
-    # 2. FIX 1: Close gaps to guarantee unbroken continuous lines
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, kernel_close, iterations=2)
+    # 3. חילוץ כל קווי המתאר (גם חיצוניים וגם פנימיים - RETR_CCOMP)
+    contours, _ = cv2.findContours(bin_img, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_KCOS)
 
-    # Upscale for smooth anti-aliased contour extraction
-    upscale = 4
-    bin_img = cv2.resize(
-        bin_img,
-        (w_orig * upscale, h_orig * upscale),
-        interpolation=cv2.INTER_CUBIC,
-    )
-
-    # Blur + threshold removes staircase steps
-    bin_img = cv2.GaussianBlur(bin_img, (5, 5), 0)
-    _, bin_img = cv2.threshold(bin_img, 127, 255, cv2.THRESH_BINARY)
-
-    # Extract contours
-    contours, _ = cv2.findContours(
-        bin_img,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_TC89_KCOS,
-    )
-
-    contours = [c for c in contours if cv2.contourArea(c) >= 50 * upscale * upscale]
     if not contours:
-        print(f"Warning: no significant contours for {out_path}")
+        print(f"Warning: no contours found for {out_path}")
         return
 
-    # 3. FIX 2: Fixed canvas scaling (consistent size & centering)
-    full_w_px = w_orig * upscale
-    full_h_px = h_orig * upscale
-
-    scale = canvas_mm / max(full_w_px, full_h_px)
-    offset_x = (canvas_mm - full_w_px * scale) / 2
-    offset_y = (canvas_mm - full_h_px * scale) / 2
+    # חישוב קנה מידה מדויק לפי גודל ה-PNG המקורי
+    scale = canvas_mm / max(w_orig, h_orig)
+    offset_x = (canvas_mm - w_orig * scale) / 2
+    offset_y = (canvas_mm - h_orig * scale) / 2
 
     def px_to_mm(p):
         return (
             p[0] * scale + offset_x,
-            (full_h_px - p[1]) * scale + offset_y,
+            (h_orig - p[1]) * scale + offset_y,
         )
 
     doc = ezdxf.new(setup=True)
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
 
+    # 4. המרה ל-DXF ברמת דיוק גבוהה (epsilon = 0.4 פיקסלים בלבד)
     for c in contours:
-        epsilon = simplify_epsilon * upscale
-        approx = cv2.approxPolyDP(c, epsilon=epsilon, closed=True)
+        if cv2.contourArea(c) < 10:  # התעלמות מרעשים זעירים בלבד
+            continue
+
+        # פישוט מזערי כדי לשמור על הצורה המקורית של ה-PNG
+        approx = cv2.approxPolyDP(c, epsilon=0.4, closed=True)
         pts = [px_to_mm(p[0]) for p in approx]
 
         if len(pts) > 2:
