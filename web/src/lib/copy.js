@@ -25,6 +25,8 @@ export const COPY = {
       sentencePlaceholder: 'כתבו משפט קצר בעברית…',
       pictureLabel: 'מה רואים בציור?',
       picturePlaceholder: 'תארו במילה־שתיים, למשל: כלב, בית, פרח',
+      pictureHint: 'עד שתי מילים',
+      pictureTooLong: 'אפשר עד שתי מילים בלבד — נסחו מחדש בקצרה.',
       addPage: 'הוסיפו עמוד',
       pagesTitle: 'העמודים בספר',
       empty: 'עוד לא הוספתם עמודים',
@@ -104,6 +106,7 @@ export const COPY = {
       errorSignup: 'ההרשמה נכשלה. ייתכן ששם המשתמש כבר תפוס',
       errorUsername: 'שם המשתמש חייב להכיל לפחות 3 תווים (אותיות, ספרות, _ . -)',
       errorPassword: 'הסיסמה חייבת להכיל לפחות 6 תווים',
+      captchaRequired: 'אנא אשרו שאינכם רובוט',
     },
 
     about: {
@@ -148,6 +151,8 @@ export const COPY = {
       sentencePlaceholder: 'Write a short word or sentence…',
       pictureLabel: 'What’s in the picture?',
       picturePlaceholder: 'A word or two, e.g. dog, house, flower',
+      pictureHint: 'Up to two words',
+      pictureTooLong: 'Up to two words only — please shorten it.',
       addPage: 'Add page',
       pagesTitle: 'Pages in the book',
       empty: 'No pages added yet',
@@ -227,6 +232,7 @@ export const COPY = {
       errorSignup: 'Sign-up failed. That username may already be taken',
       errorUsername: 'Username must be at least 3 characters (letters, digits, _ . -)',
       errorPassword: 'Password must be at least 6 characters',
+      captchaRequired: 'Please confirm you’re not a robot',
     },
 
     about: {

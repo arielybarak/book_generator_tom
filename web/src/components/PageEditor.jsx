@@ -75,10 +75,13 @@ export function PageEditor({ onAdd }) {
   }
 
   const uploadMissing = imageMode === 'upload' && !upload
+  // Picture description drives the auto-drawing prompt — keep it to <=2 words.
+  const pictureWordCount = picture.trim() ? picture.trim().split(/\s+/).length : 0
+  const pictureTooLong = imageMode === 'generate' && pictureWordCount > 2
 
   function submit(e) {
     e.preventDefault()
-    if (!text.trim() || uploadMissing || uploadBusy) return
+    if (!text.trim() || uploadMissing || uploadBusy || pictureTooLong) return
     onAdd({
       text: text.trim(),
       picture: picture.trim(),
@@ -162,15 +165,25 @@ export function PageEditor({ onAdd }) {
       {imageMode === 'generate' && (
         <div>
           <label htmlFor="page-picture" className="text-ink mb-1 block font-semibold">
-            {t.builder.pictureLabel}
+            {t.builder.pictureLabel}{' '}
+            <span className="text-muted text-sm font-normal">({t.builder.pictureHint})</span>
           </label>
           <input
             id="page-picture"
             value={picture}
             onChange={(e) => setPicture(e.target.value)}
             placeholder={t.builder.picturePlaceholder}
-            className="border-line bg-surface focus:border-brand w-full rounded-2xl border px-4 py-3 text-lg outline-none"
+            aria-invalid={pictureTooLong}
+            aria-describedby={pictureTooLong ? 'page-picture-err' : undefined}
+            className={`bg-surface w-full rounded-2xl border px-4 py-3 text-lg outline-none ${
+              pictureTooLong ? 'border-red-500 focus:border-red-500' : 'border-line focus:border-brand'
+            }`}
           />
+          {pictureTooLong && (
+            <p id="page-picture-err" role="alert" className="mt-1 text-sm text-red-600">
+              {t.builder.pictureTooLong}
+            </p>
+          )}
         </div>
       )}
 
@@ -249,7 +262,11 @@ export function PageEditor({ onAdd }) {
         </p>
       )}
 
-      <Button type="submit" variant="soft" disabled={!text.trim() || uploadMissing || uploadBusy}>
+      <Button
+        type="submit"
+        variant="soft"
+        disabled={!text.trim() || uploadMissing || uploadBusy || pictureTooLong}
+      >
         <span aria-hidden="true">＋</span> {t.builder.addPage}
       </Button>
     </form>

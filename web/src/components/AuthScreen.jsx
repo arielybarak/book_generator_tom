@@ -3,6 +3,7 @@ import { useAuth } from '../lib/auth'
 import { useLang } from '../lib/i18n'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
+import { Turnstile, captchaEnabled } from './Turnstile'
 
 const USERNAME_RE = /^[a-z0-9_.-]{3,}$/i
 
@@ -14,13 +15,22 @@ export function AuthScreen() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [captchaToken, setCaptchaToken] = useState('')
+  const [captchaNonce, setCaptchaNonce] = useState(0) // bump to reset the widget
   const usernameRef = useRef(null)
 
   const isLogin = mode === 'login'
 
+  // A used/failed Turnstile token can't be reused — clear it and remount the widget.
+  function resetCaptcha() {
+    setCaptchaToken('')
+    setCaptchaNonce((n) => n + 1)
+  }
+
   function validateLocal() {
     if (!USERNAME_RE.test(username)) return t.auth.errorUsername
     if (password.length < 6) return t.auth.errorPassword
+    if (captchaEnabled && !captchaToken) return t.auth.captchaRequired
     return null
   }
 
@@ -35,9 +45,12 @@ export function AuthScreen() {
     setBusy(true)
     try {
       const { error: err } = isLogin
-        ? await signIn(username, password)
-        : await signUp(username, password)
-      if (err) setError(isLogin ? t.auth.errorInvalid : t.auth.errorSignup)
+        ? await signIn(username, password, captchaToken)
+        : await signUp(username, password, captchaToken)
+      if (err) {
+        setError(isLogin ? t.auth.errorInvalid : t.auth.errorSignup)
+        resetCaptcha()
+      }
       // on success: onAuthStateChange in AuthProvider updates session → App re-renders
     } finally {
       setBusy(false)
@@ -90,13 +103,20 @@ export function AuthScreen() {
             />
           </div>
 
+          {captchaEnabled && <Turnstile key={captchaNonce} onToken={setCaptchaToken} />}
+
           {error && (
             <p role="alert" aria-live="polite" className="text-sm text-red-600">
               {error}
             </p>
           )}
 
-          <Button type="submit" variant="primary" disabled={busy} className="w-full">
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={busy || (captchaEnabled && !captchaToken)}
+            className="w-full"
+          >
             {busy ? '…' : isLogin ? t.auth.loginCta : t.auth.signupCta}
           </Button>
         </form>
