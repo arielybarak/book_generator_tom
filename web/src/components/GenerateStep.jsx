@@ -42,6 +42,8 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
           imageDesc: page.picture,
           objectClass: page.picture,
           language: lang,
+          imageMode: page.imageMode || 'generate',
+          imageData: page.imageMode === 'upload' ? page.uploadedImage || '' : '',
         },
         (msg) => {
           // queue=true means the Space is still waking or other jobs are ahead
@@ -116,6 +118,7 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
           const sel = selectedIndex(res)
           const st = status[p.id]
           const busy = ['working', 'waking', 'queued'].includes(st)
+          const mode = p.imageMode || 'generate'
           return (
             <Card key={p.id} className="overflow-hidden">
               <div className="border-line flex items-center gap-3 border-b p-4">
@@ -134,7 +137,14 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
               </div>
 
               <div className="bg-paper relative flex aspect-square items-center justify-center p-4">
-                {chosen?.imageUrl ? (
+                {mode === 'none' && !busy && st !== 'error' ? (
+                  <div className="text-muted text-center">
+                    <span aria-hidden="true" className="text-3xl">
+                      ∅
+                    </span>
+                    <p className="mt-2 text-sm">{t.builder.modeNone}</p>
+                  </div>
+                ) : chosen?.imageUrl ? (
                   <img
                     src={chosen.imageUrl}
                     alt={`${t.generate.page} ${i + 1}: ${p.picture || p.text}`}
@@ -210,19 +220,24 @@ export function GenerateStep({ book, results, setResults, onNext, onBack }) {
                 </div>
               )}
 
-              {(chosen || st === 'error') && (
-                <div className="border-line border-t p-3 text-center">
-                  {chosen?.imageUrl && !chosen?.stlUrl && (
-                    <p className="text-muted mb-2 text-sm">{t.generate.noStl}</p>
-                  )}
-                  <Button size="sm" variant="ghost" onClick={() => generateOne(p)} disabled={busy}>
-                    <span aria-hidden="true">↻</span>{' '}
-                    {st === 'error' || (chosen && !chosen.stlUrl)
-                      ? t.generate.retry
-                      : t.generate.regenerate}
-                  </Button>
-                </div>
-              )}
+              {(() => {
+                const needsRetry = st === 'error' || (chosen && !chosen.stlUrl)
+                // Redraw only makes sense for auto-generated art; upload/none pages
+                // are deterministic, so they offer a Retry button on failure only.
+                const show = mode === 'generate' ? chosen || st === 'error' : needsRetry
+                if (!show) return null
+                return (
+                  <div className="border-line border-t p-3 text-center">
+                    {chosen?.imageUrl && !chosen?.stlUrl && (
+                      <p className="text-muted mb-2 text-sm">{t.generate.noStl}</p>
+                    )}
+                    <Button size="sm" variant="ghost" onClick={() => generateOne(p)} disabled={busy}>
+                      <span aria-hidden="true">↻</span>{' '}
+                      {needsRetry ? t.generate.retry : t.generate.regenerate}
+                    </Button>
+                  </div>
+                )
+              })()}
             </Card>
           )
         })}

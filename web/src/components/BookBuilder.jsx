@@ -74,9 +74,19 @@ export function BookBuilder({ book, setBook, onGenerate, onBack }) {
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-ink truncate font-semibold">{p.text}</p>
-                    {p.picture && (
+                    {(!p.imageMode || p.imageMode === 'generate') && p.picture && (
                       <p className="text-muted truncate text-sm">
                         <span aria-hidden="true">🖼</span> {p.picture}
+                      </p>
+                    )}
+                    {p.imageMode === 'upload' && (
+                      <p className="text-muted truncate text-sm">
+                        <span aria-hidden="true">⬆</span> {t.builder.modeUpload}
+                      </p>
+                    )}
+                    {p.imageMode === 'none' && (
+                      <p className="text-muted truncate text-sm">
+                        <span aria-hidden="true">∅</span> {t.builder.modeNone}
                       </p>
                     )}
                   </div>

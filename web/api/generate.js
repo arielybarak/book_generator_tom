@@ -45,12 +45,22 @@ export default async function handler(req, res) {
   }
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {}
-    const { raw_text = '', variations = {}, image_desc = '', object_class = '', language = 'hebrew' } = body
+    const {
+      raw_text = '',
+      variations = {},
+      image_desc = '',
+      object_class = '',
+      language = 'hebrew',
+      image_mode = 'generate',
+      image_data = '',
+    } = body
 
     const r = await fetch(`${ROOT}/gradio_api/call/generate_page`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ data: [raw_text, variations, image_desc, object_class, language] }),
+      body: JSON.stringify({
+        data: [raw_text, variations, image_desc, object_class, language, image_mode, image_data],
+      }),
     })
     if (!r.ok) {
       res.status(502).json({ error: 'enqueue_failed', status: r.status })
