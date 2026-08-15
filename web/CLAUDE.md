@@ -25,11 +25,16 @@ Call pattern:
 1. `POST {ROOT}/gradio_api/call/generate_page  {"data": [...]}` → `{ event_id }`
 2. `GET  {ROOT}/gradio_api/call/generate_page/{event_id}` → SSE; read to `event: complete`
 
-- **inputs** (positional): `[raw_text, variations, image_desc, object_class]`
+- **inputs** (positional): `[raw_text, variations, image_desc, object_class, language, image_mode, image_data]`
   - `raw_text` — Hebrew sentence
   - `variations` — `{ "<charIndex>": "<key>" }` nikud choices (keys from `lib/nikud.js`)
   - `image_desc` / `object_class` — short picture description (Hebrew or English)
-- **outputs**: `[image, stl]` — Gradio file objects `{ url: "…/gradio_api/file=/tmp/gradio/…" }`
+  - `language` — `"hebrew"` | `"english"`
+  - `image_mode` — `"generate"` (SD line-art, default) | `"upload"` (user's own drawing) | `"none"` (text + Braille only, no image)
+  - `image_data` — base64 data URL of the drawing, **only** for `"upload"` mode (empty string otherwise). Compressed client-side in `lib/image.js` before sending.
+- **outputs**: `[image, stl]` — Gradio file objects `{ url: "…/gradio_api/file=/tmp/gradio/…" }`; `image` is `null` for `"none"` mode
+
+These 7 fields must stay in lockstep across **three** layers: `hfClient.js` body → `api/generate.js` proxy `data[]` array → the Space's `generate_page` inputs list. Adding/reordering one means editing all three.
 
 Defined in `hf_space/gradio_app_lithophane.py`. Probe endpoints (CPU, zero GPU): `ping_assets`,
 `slow_ping`. Use `/space-probe` to health-check the Space and `/hf-logs` to read tracebacks.

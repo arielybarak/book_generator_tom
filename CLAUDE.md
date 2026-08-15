@@ -36,6 +36,8 @@ Hebrew input
 
 `hf_space/gradio_app_lithophane.py` is the primary deployed entry point. It imports from `src/` and adds the Gradio UI layer plus a hidden `/generate_page` API endpoint used by the web frontend. The full pipeline is wired: per page it generates the image PNG, three DXFs (image/text/braille), and the final STL via `create_one_page_stl_from_dxf()`, then returns a ZIP. SD inference runs under a `@spaces.GPU` decorator (ZeroGPU); translation, DXF, and STL stay on CPU.
 
+Per page, the **image source** is selectable via `image_mode` (see the web contract below): `generate` (Stable Diffusion, the only GPU step), `upload` (a user PNG/JPG decoded from base64 → `clean_uploaded_image_to_png()` → `png_to_dxf()`), or `none` (text + Braille only — passes `image_dxf=None`, which `create_one_page_stl_from_dxf()` already handles by skipping the image band). **Both `upload` and `none` skip the GPU entirely.**
+
 ## Module responsibilities
 
 - **`src/language_funcs.py`** — All Hebrew/Braille logic: constants (`HEBREW_MAP`, `SPECIAL_REPLACEMENTS`, `DISPLAY_MAPPING`), `hebrew_translator()`, `convert_to_braille()`, `apply_variations()` (UI-safe nikud), `check_ambiguities()` (feeds the Gradio disambiguation dropdowns), `add_nikud()` (CLI-only, uses `input()`)
@@ -56,7 +58,7 @@ All geometry is controlled by module-level constants:
 
 `web/` is a React 19 + Vite + Tailwind v4 SPA — the public Hebrew face of TOM. Its own conventions and API contract are in `web/CLAUDE.md`. Key points for the main repo:
 
-- **API**: the frontend speaks only to `/generate_page` on the HF Space. Inputs: `[raw_text, variations, image_desc, object_class]`. Outputs: `[image_url, stl_url]`.
+- **API**: the frontend speaks only to `/generate_page` on the HF Space. Inputs: `[raw_text, variations, image_desc, object_class, language, image_mode, image_data]` — `image_mode` is `generate`|`upload`|`none` (upload sends the drawing as a base64 data URL in `image_data`). Outputs: `[image_url, stl_url]` (`image_url` is null for `none`). The 7 inputs are mirrored across `hfClient.js` → `web/api/generate.js` → the Space's `generate_page` inputs list — change all three together.
 - **nikud sync**: `web/src/lib/nikud.js` option keys must mirror `SPECIAL_REPLACEMENTS` keys in `src/language_funcs.py` (`default`, `holam`, `shuruk`, `shin`, `sin`, `dagesh`). If backend keys change, update `nikud.js` too.
 - **Deploy**: Vercel project root = `web/`, env var `VITE_HF_SPACE` = HF Space id.
 - Does **not** use `sync_to_space.sh` — it never touches `hf_space/src/` directly.
