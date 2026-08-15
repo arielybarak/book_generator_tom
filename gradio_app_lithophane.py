@@ -26,6 +26,7 @@ except ImportError:
     spaces = _NoSpaces()
 
 import gradio as gr
+import base64
 import os
 import re
 import time
@@ -53,6 +54,8 @@ from src.image_funcs import (
     image_to_dxf_exact,
     generate_text_dxf,
     generate_braille_dxf_from_text,
+    png_to_dxf,
+    clean_uploaded_image_to_png,
 )
 from src.dxf_3d import create_one_page_stl_from_dxf
 from src.config import cfg
@@ -339,6 +342,16 @@ def _safe_slug(text, max_len=24):
     return slug[:max_len].strip('_')
 
 
+def _decode_data_url_to_file(data_url, out_path):
+    """Write a base64 data URL (or bare base64) to a binary file. Raises if empty/invalid."""
+    if not data_url:
+        raise RuntimeError("no image data provided")
+    b64 = data_url.split(",", 1)[1] if data_url.startswith("data:") else data_url
+    with open(out_path, "wb") as f:
+        f.write(base64.b64decode(b64))
+    return out_path
+
+
 def generate_page_assets(page_data, output_dir):
     page_num = page_data["page_number"]
     raw_text = page_data["raw_text"]
@@ -346,6 +359,10 @@ def generate_page_assets(page_data, output_dir):
     obj_class = page_data["object_class"]
     variations = page_data["variations"]
     language = page_data.get("language", "hebrew")
+    # Per-page illustration source: "generate" (Stable Diffusion, default),
+    # "upload" (user-supplied drawing, base64 in image_data), or "none" (no image).
+    image_mode = page_data.get("image_mode", "generate")
+    image_data = page_data.get("image_data", "")
 
     is_english = language == "english"
     display_text = raw_text if is_english else apply_variations(raw_text, variations)
@@ -359,6 +376,47 @@ def generate_page_assets(page_data, output_dir):
     dxf_text_path = os.path.join(output_dir, f"{base_name}_text.dxf")
     stl_path = os.path.join(output_dir, f"{base_name}.stl")
 
+    if image_mode == "none":
+        # Text + Braille only — no illustration. STL gets no image DXF (blank area).
+        print(f"Page {page_num}: no-image mode", flush=True)
+        img_path = None
+        dxf_img_path = None
+
+    elif image_mode == "upload":
+        # User-supplied drawing (photo/scan). Clean it up, then trace to DXF. No GPU.
+        print(f"Page {page_num}: upload mode", flush=True)
+        try:
+            src_path = os.path.join(output_dir, f"{base_name}_upload_src")
+            _decode_data_url_to_file(image_data, src_path)
+            clean_uploaded_image_to_png(src_path, img_path)
+            png_to_dxf(img_path, dxf_img_path)
+        except Exception as e:
+            print(f"Upload processing failed for page {page_num}: {e}", flush=True)
+            dxf_img_path = None
+
+    else:
+        _generate_illustration(page_num, raw_text, display_text, desc, obj_class, img_path, dxf_img_path)
+
+    generate_braille_dxf_from_text(braille_text, dxf_braille_path)
+    generate_text_dxf(display_text, dxf_text_path, rtl=not is_english)
+
+    # Only band an image when we actually produced its DXF (none-mode, upload/SD failure → skip).
+    image_dxf_arg = Path(dxf_img_path) if (dxf_img_path and os.path.exists(dxf_img_path)) else None
+    try:
+        create_one_page_stl_from_dxf(
+            txt_dxf=Path(dxf_text_path),
+            braille_dxf=Path(dxf_braille_path),
+            image_dxf=image_dxf_arg,
+            output=Path(stl_path),
+        )
+    except Exception as e:
+        print(f"STL generation failed for page {page_num}: {e}", flush=True)
+
+    return [img_path, dxf_img_path, dxf_braille_path, dxf_text_path, stl_path]
+
+
+def _generate_illustration(page_num, raw_text, display_text, desc, obj_class, img_path, dxf_img_path):
+    """Stable-Diffusion (or basic-shape) illustration path — writes img_path + dxf_img_path."""
     basic_shape = detect_basic_shape(raw_text, display_text, desc, obj_class)
 
     if basic_shape is not None:
@@ -406,21 +464,6 @@ def generate_page_assets(page_data, output_dir):
 
         except Exception as e:
             print(f"Image generation failed for page {page_num}: {e}", flush=True)
-
-    generate_braille_dxf_from_text(braille_text, dxf_braille_path)
-    generate_text_dxf(display_text, dxf_text_path, rtl=not is_english)
-
-    try:
-        create_one_page_stl_from_dxf(
-            txt_dxf=Path(dxf_text_path),
-            braille_dxf=Path(dxf_braille_path),
-            image_dxf=Path(dxf_img_path),
-            output=Path(stl_path),
-        )
-    except Exception as e:
-        print(f"STL generation failed for page {page_num}: {e}", flush=True)
-
-    return [img_path, dxf_img_path, dxf_braille_path, dxf_text_path, stl_path]
 
 
 def process_book(book_state_data):
@@ -619,11 +662,16 @@ with gr.Blocks(title="Hebrew Braille Book Generator") as demo:
     web_desc = gr.Textbox(visible=False)
     web_class = gr.Textbox(visible=False)
     web_lang = gr.Textbox(visible=False)
+    web_mode = gr.Textbox(visible=False)  # "generate" | "upload" | "none"
+    web_data = gr.Textbox(visible=False)  # base64 data URL for "upload" mode
     web_out_img = gr.File(visible=False)
     web_out_stl = gr.File(visible=False)
     web_btn = gr.Button(visible=False)
 
-    def generate_page_web(raw_text, variations, image_desc, object_class, language="hebrew"):
+    # New trailing args default so older callers (5-arg) keep working.
+    def generate_page_web(raw_text, variations, image_desc, object_class,
+                          language="hebrew", image_mode="generate", image_data=""):
+        mode = (image_mode or "generate").lower()
         page = {
             "page_number": 1,
             "raw_text": raw_text or "",
@@ -631,6 +679,8 @@ with gr.Blocks(title="Hebrew Braille Book Generator") as demo:
             "object_class": object_class or "",
             "variations": variations or {},
             "language": (language or "hebrew").lower(),
+            "image_mode": mode,
+            "image_data": image_data or "",
         }
 
         work_dir = os.path.join("temp_gen", str(uuid.uuid4()))
@@ -639,7 +689,8 @@ with gr.Blocks(title="Hebrew Braille Book Generator") as demo:
         files = generate_page_assets(page, work_dir)
         img_path, stl_path = files[0], files[-1]
 
-        if not (img_path and os.path.exists(img_path)):
+        # "none" mode has no illustration by design — don't demand one.
+        if mode != "none" and not (img_path and os.path.exists(img_path)):
             raise gr.Error("יצירת הציור נכשלה. נסו שוב בעוד רגע.")
 
         if not (stl_path and os.path.exists(stl_path)):
@@ -649,7 +700,7 @@ with gr.Blocks(title="Hebrew Braille Book Generator") as demo:
 
     web_btn.click(
         generate_page_web,
-        inputs=[web_text, web_vars, web_desc, web_class, web_lang],
+        inputs=[web_text, web_vars, web_desc, web_class, web_lang, web_mode, web_data],
         outputs=[web_out_img, web_out_stl],
         api_name="generate_page",
     )
