@@ -3,6 +3,7 @@ import { Card } from './ui/Card'
 import { StlViewer } from './StlViewer'
 import { StepHeading } from './StepHeading'
 import { useLang } from '../lib/i18n'
+import { chosenVariant } from '../lib/pageResults'
 
 async function downloadStl(url, filename) {
   try {
@@ -40,7 +41,7 @@ function pageFilename(text, pageNo) {
 /**
  * Step 4 — preview each finished page in 3D and download its printable STL.
  */
-export default function DownloadStep({ book, results, onRestart }) {
+export default function DownloadStep({ book, results, onRestart, onBack }) {
   const { t } = useLang()
 
   return (
@@ -50,11 +51,11 @@ export default function DownloadStep({ book, results, onRestart }) {
 
       <div className="space-y-6">
         {book.pages.map((p, i) => {
-          const res = results[p.id]
-          if (!res?.stlUrl) return null
+          const chosen = chosenVariant(results[p.id])
+          if (!chosen?.stlUrl) return null
           return (
             <Card key={p.id} className="p-4">
-              <StlViewer url={res.stlUrl} className="h-80 w-full sm:h-96" />
+              <StlViewer url={chosen.stlUrl} className="h-80 w-full sm:h-96" />
               <div className="mt-4 flex flex-col items-center gap-4 text-center sm:flex-row sm:justify-between sm:text-start">
                 <div>
                   <p className="text-muted mb-1 text-sm">
@@ -63,7 +64,7 @@ export default function DownloadStep({ book, results, onRestart }) {
                   <p className="text-ink font-semibold">{p.text}</p>
                 </div>
                 <button
-                  onClick={() => downloadStl(res.stlUrl, pageFilename(p.text, i + 1))}
+                  onClick={() => downloadStl(chosen.stlUrl, pageFilename(p.text, i + 1))}
                   className="rounded-btn bg-brand shadow-soft hover:bg-brand-dark inline-flex shrink-0 items-center justify-center gap-2 px-6 py-3 font-semibold text-white transition"
                 >
                   <span aria-hidden="true">⬇</span> {t.download.download}
@@ -80,7 +81,12 @@ export default function DownloadStep({ book, results, onRestart }) {
         <p className="text-muted">{t.download.printBody}</p>
       </Card>
 
-      <div className="mt-8 flex justify-center">
+      <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+        {onBack && (
+          <Button size="lg" variant="ghost" onClick={onBack}>
+            <span aria-hidden="true">{t.common.arrowPrev}</span> {t.common.back}
+          </Button>
+        )}
         <Button size="lg" variant="ghost" onClick={onRestart}>
           <span aria-hidden="true">＋</span> {t.download.startOver}
         </Button>

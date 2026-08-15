@@ -41,9 +41,11 @@ export const COPY = {
       failed: 'משהו השתבש ביצירת העמוד. אפשר לנסות שוב.',
       noStl: 'הציור מוכן, אך קובץ ההדפסה נכשל. אפשר לצייר מחדש.',
       allReady: 'כל העמודים מוכנים להורדה',
-      backToEdit: 'חזרה לעריכה',
       retry: 'נסו שוב',
       elapsed: 'זמן היצירה',
+      chooseDrawing: 'שמרנו את כל הציורים — בחרו את זה שאהבתם',
+      option: 'ציור',
+      selected: 'נבחר',
     },
 
     download: {
@@ -144,9 +146,11 @@ export const COPY = {
       failed: 'Something went wrong creating the page. You can try again.',
       noStl: 'The drawing is ready, but the print file failed. You can redraw.',
       allReady: 'All pages are ready to download',
-      backToEdit: 'Back to editing',
       retry: 'Try again',
       elapsed: 'Generation time',
+      chooseDrawing: 'We kept every drawing — pick the one you like',
+      option: 'Drawing',
+      selected: 'Selected',
     },
 
     download: {

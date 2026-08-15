@@ -177,7 +177,12 @@ export default function App() {
           <div hidden={view === 'about'}>
             {step === 0 && <Landing onStart={() => setStep(1)} />}
             {step === 1 && (
-              <BookBuilder book={book} setBook={setBook} onGenerate={() => setStep(2)} />
+              <BookBuilder
+                book={book}
+                setBook={setBook}
+                onGenerate={() => setStep(2)}
+                onBack={() => goTo(0)}
+              />
             )}
             {step === 2 &&
               (authLoading ? (
@@ -211,7 +216,12 @@ export default function App() {
                   </div>
                 }
               >
-                <DownloadStep book={book} results={results} onRestart={restart} />
+                <DownloadStep
+                  book={book}
+                  results={results}
+                  onRestart={restart}
+                  onBack={() => goTo(2)}
+                />
               </Suspense>
             )}
           </div>
