@@ -177,11 +177,17 @@ def create_images(
 
 def images_to_dxf(image_location, text_location, braille_location):
     """Convert the three PNGs produced by create_images() to DXF files."""
-    dxf_image   = str(image_location).replace('.png', '.dxf')
-    dxf_text    = str(text_location).replace('.png', '.dxf')
+    dxf_image = str(image_location).replace('.png', '.dxf')
+    dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
+    # 1. יצירת ה-DXF המקורי של התמונה דרך הפונקציה הקיימת
     imf.image_to_dxf_exact(image_location, dxf_image)
+
+    # 2. הוספת מנגנון הריפוי: קורא את ה-DXF שנוצר, מגשר על הרווחים, ודורס את הקובץ עם הגרסה הרציפה
+    imf.heal_dxf_fragments(dxf_image, dxf_image, max_gap_mm=10.0)
+
+    # 3. המרת טקסט וברייל ל-DXF (אותם אנחנו לא מתקנים כי הם נוצרים מראש בצורה וקטורית אחידה)
     imf.png_to_dxf(text_location, dxf_text)
     imf.png_to_dxf(braille_location, dxf_braille)
 

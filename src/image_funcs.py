@@ -54,6 +54,91 @@ def convert_tensor_to_pil_img(tensor):
 
 
 # ── Image → DXF ────────────────────────────────────────────────────────────────
+def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=10.0, simplify_epsilon=1.5):
+    """
+    מנגנון אקסטרה: קורא קובץ DXF קיים עם קווים מקוטעים/בלוקים מופרדים,
+    מגשר על הרווחים, ומייצר קובץ DXF חדש עם מתאר רציף ונקי.
+    """
+    try:
+        doc = ezdxf.readfile(input_dxf)
+    except IOError:
+        print(f"Error: Could not read {input_dxf}")
+        return
+
+    msp = doc.modelspace()
+
+    # איסוף כל הנקודות כדי למצוא את גבולות השרטוט (Bounding Box)
+    all_pts = []
+    for entity in msp:
+        if entity.dxftype() == 'LWPOLYLINE':
+            all_pts.extend(entity.get_points('xy'))
+
+    if not all_pts:
+        print(f"Warning: No polylines found in {input_dxf} to heal.")
+        return
+
+    all_pts = np.array(all_pts)
+    min_x, min_y = all_pts.min(axis=0)
+    max_x, max_y = all_pts.max(axis=0)
+
+    # המרה לקנבס וירטואלי ברזולוציה גבוהה (10 פיקסלים למ"מ)
+    # זה מאפשר לנו להפעיל לוגיקה גיאומטרית בצורה יציבה
+    ppm = 10
+    w_px = int((max_x - min_x) * ppm) + 100
+    h_px = int((max_y - min_y) * ppm) + 100
+
+    canvas = np.zeros((h_px, w_px), dtype=np.uint8)
+
+    def to_px(x, y):
+        # הוספת שוליים של 50 פיקסלים למניעת חיתוך בקצוות
+        return int((x - min_x) * ppm) + 50, int((y - min_y) * ppm) + 50
+
+    # ציור המקטעים הקיימים על הקנבס
+    for entity in msp:
+        if entity.dxftype() == 'LWPOLYLINE':
+            pts = [to_px(p[0], p[1]) for p in entity.get_points('xy')]
+            pts_arr = np.array(pts, np.int32)
+
+            if entity.closed or len(pts) > 2:
+                # מילוי צורות סגורות (הבלוקים הקטנים מההדפסה שלך)
+                cv2.fillPoly(canvas, [pts_arr], 255)
+            elif len(pts) == 2:
+                # ציור קווים עבים
+                cv2.line(canvas, pts[0], pts[1], 255, thickness=4)
+
+    # ── מנגנון ההלחמה ──
+    # המרה של הרווח המקסימלי במ"מ לפיקסלים, וביצוע סגירה (Closing) מורחבת
+    gap_px = int(max_gap_mm * ppm)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (gap_px, gap_px))
+    closed_canvas = cv2.morphologyEx(canvas, cv2.MORPH_CLOSE, kernel)
+
+    # החלקת קצוות משוננים שנוצרו מהחיבור
+    closed_canvas = cv2.GaussianBlur(closed_canvas, (5, 5), 0)
+    _, closed_canvas = cv2.threshold(closed_canvas, 127, 255, cv2.THRESH_BINARY)
+
+    # חילוץ קווי המתאר החדשים והרציפים
+    contours, _ = cv2.findContours(closed_canvas, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
+
+    # יצירת DXF חדש ומתוקן
+    new_doc = ezdxf.new(setup=True)
+    new_doc.units = ezdxf.units.MM
+    new_msp = new_doc.modelspace()
+
+    for c in contours:
+        # פישוט הקו כדי לא להעמיס נקודות מיותרות
+        approx = cv2.approxPolyDP(c, epsilon=simplify_epsilon * ppm, closed=True)
+        dxf_pts = []
+        for p in approx:
+            px, py = p[0]
+            # המרה חזרה לקואורדינטות אמיתיות במ"מ
+            mx = ((px - 50) / ppm) + min_x
+            my = ((py - 50) / ppm) + min_y
+            dxf_pts.append((mx, my))
+
+        if len(dxf_pts) > 2:
+            new_msp.add_lwpolyline(dxf_pts, close=True, dxfattribs={"color": 7})
+
+    new_doc.saveas(output_dxf)
 
 def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0, bridge_gaps=True):
     """
