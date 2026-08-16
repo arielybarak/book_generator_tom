@@ -101,7 +101,6 @@ def create_images(
 
     # ── עיבוד התמונה: סף דק, סגירת רווחים וצינטור ─────────────────────────
     # עיבוד התמונה ב-PNG: סף, איחוי חורים עדין וצינטור
-    # ── עיבוד התמונה: סף דק, סגירת רווחים וצינטור ─────────────────────────
     img_np = np.array(image)
     gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
 
@@ -137,7 +136,7 @@ def create_images(
     h, w = edges.shape
     edges[h - 1:h, w - 1:w] = 255
 
-    # צינטור התמונה (נשאר ללא שינוי)
+    # צינטור התמונה
     ys, xs = np.where(edges[1:h - 1, 1:w - 1] == 0)
     if len(xs) > 0:
         shift_x = int(w / 2 - xs.mean())
@@ -173,6 +172,13 @@ def create_images(
     plt.axis("off")
     plt.savefig(braille_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
     plt.close()
+
+    # ─────────────────────────────────────────────────────────────────
+    # >>> השורה הקריטית שהייתה חסרה! <<<
+    # מפעיל את ההמרה ל-DXF מיד אחרי שכל קובצי ה-PNG נוצרו ונשמרו בהצלחה
+    # ─────────────────────────────────────────────────────────────────
+    images_to_dxf(image_output_location, text_output_location, braille_output_location)
+
 
 def images_to_dxf(image_location, text_location, braille_location):
     """Convert the three PNGs produced by create_images() to DXF files."""

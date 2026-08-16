@@ -528,8 +528,8 @@ def thicken_png_lines(image_path, thickness=6):
 
 def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
     """
-    המרת תמונת ציור (PNG) ל-DXF תקני. פונקציה זו הוחלפה בגרסה חזקה ויציבה
-    שמתמודדת נכון עם צבעים, ציר ה-Y וחורים פנימיים.
+    המרת תמונת ציור (PNG) ל-DXF תקני.
+    כולל עיבוי בזיכרון למניעת העלמות של קווים במנועי תלת-ממד.
     """
     canvas_mm = canvas_cm * 10.0
 
@@ -538,8 +538,14 @@ def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
         print(f"Error loading {png_path}")
         return
 
-    # חובה להפוך צבעים לפני findContours (הוא מחפש אובייקטים לבנים על רקע שחור)
+    # חובה להפוך צבעים לפני findContours
     _, bw = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY_INV)
+
+    # >>> התיקון הקריטי למנוע ה-3D <<<
+    # אנו מעבים את הקווים רק בזיכרון כדי שה-DXF יהיה "בשרני"
+    # ולא יקרוס כשתוכנת התלת-ממד תנסה לנפח אותו. זה לא משנה את ה-PNG ששמור בדיסק!
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    bw = cv2.dilate(bw, kernel, iterations=1)
 
     # חובה להשתמש ב-RETR_TREE כדי לא לאבד חורים פנימיים או פרטים קטנים
     contours, _ = cv2.findContours(bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
@@ -555,8 +561,8 @@ def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
         # סינון ה-Bounding Box החיצוני אם הוא תופס את כל התמונה
         if w > w_img * 0.95 and h > h_img * 0.95 and x < 5 and y < 5:
             continue
-        # סינון רעשים נקודתיים
-        if cv2.contourArea(c) < 10:
+        # סינון רעשים נקודתיים (הגדלנו קצת את הסף בגלל העיבוי)
+        if cv2.contourArea(c) < 20:
             continue
 
         valid_contours.append(c)
@@ -583,8 +589,8 @@ def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
     msp = doc.modelspace()
 
     for c in valid_contours:
-        # החלקה קלה מאוד (0.5) כדי לא להכביד על הקובץ, תוך שמירה על נאמנות למקור
-        approx = cv2.approxPolyDP(c, epsilon=0.5, closed=True)
+        # החלקה מתונה כדי למנוע הצטלבויות נוספות בפוליגון
+        approx = cv2.approxPolyDP(c, epsilon=1.0, closed=True)
 
         pts = []
         for p in approx:
