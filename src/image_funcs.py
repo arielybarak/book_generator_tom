@@ -61,9 +61,6 @@ def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=20.0, simplify_epsilon=
     מנגנון "אריזת וואקום" (Shrink-Wrap): מנפח את כל המקטעים עד למיזוג מלא,
     מוצא את קו המתאר החיצוני ביותר, ומכווץ חזרה. מבטיח צורה אחת סגורה ורציפה.
     """
-    import ezdxf
-    import numpy as np
-    import cv2
 
     try:
         doc = ezdxf.readfile(input_dxf)
@@ -530,3 +527,80 @@ def thicken_png_lines(image_path, thickness=6):
     # הופכים חזרה לשחור על לבן ושומרים
     final_img = cv2.bitwise_not(thickened)
     cv2.imwrite(str(image_path), final_img)
+
+    def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_boost=3, smoothing=0.3):
+        """
+        ממיר תמונת PNG ל-DXF בצורה חלקה ומדויקת.
+        - שומר על פרטים פנימיים (עיניים, קווים פנימיים).
+        - מגשר על נתקים קטנים בלי להרוס את הצורה.
+        - מייצר קווים עגולים וחלקים ללא אפקט "מדרגות".
+        """
+        import ezdxf
+        import cv2
+        import numpy as np
+
+        canvas_mm = canvas_cm * 10.0
+
+        # 1. טעינת התמונה
+        img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            raise RuntimeError(f"Could not load image: {image_path}")
+
+        # המרה לשחור-לבן מוחלט (הקווים צריכים להיות לבנים על רקע שחור בשביל זיהוי אלגוריתמי)
+        if np.mean(img) > 127:
+            img = cv2.bitwise_not(img)
+        _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
+
+        # 2. איחוי נתקים עדין ועיבוי הקו
+        # שימוש בקרנל קטן שסוגר חורים בלי להפוך את הציור לגוש אטום
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (thickness_boost, thickness_boost))
+        bin_img = cv2.dilate(bin_img, kernel, iterations=1)
+
+        # החלקה קלה לטשטוש הפיקסלים המרובעים
+        bin_img = cv2.GaussianBlur(bin_img, (5, 5), 0)
+        _, bin_img = cv2.threshold(bin_img, 127, 255, cv2.THRESH_BINARY)
+
+        # 3. מציאת קווי המתאר (הפנימיים והחיצוניים כאחד!)
+        # RETR_TREE מוודא שנקבל גם את קו המתאר החיצוני וגם את העיניים והאף של החתול
+        contours, _ = cv2.findContours(bin_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_KCOS)
+
+        # סינון רעשים - התעלמות מנקודות קטנטנות
+        contours = [c for c in contours if cv2.contourArea(c) >= 50]
+
+        if not contours:
+            print(f"Warning: no significant contours for {out_path}")
+            return
+
+        # 4. חישוב קנה מידה ומרכוז
+        all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
+        min_x, min_y = all_pts.min(axis=0)
+        max_x, max_y = all_pts.max(axis=0)
+
+        w_px = max_x - min_x + 1
+        h_px = max_y - min_y + 1
+
+        scale = canvas_mm / max(w_px, h_px)
+        offset_x = (canvas_mm - w_px * scale) / 2
+        offset_y = (canvas_mm - h_px * scale) / 2
+
+        def px_to_mm(p):
+            return (
+                (p[0] - min_x) * scale + offset_x,
+                (max_y - p[1]) * scale + offset_y,
+            )
+
+        # 5. יצירת קובץ ה-DXF ושמירה
+        doc = ezdxf.new(setup=True)
+        doc.units = ezdxf.units.MM
+        msp = doc.modelspace()
+
+        for c in contours:
+            # epsilon קטן מאוד (0.3) מבטיח שהקו יהיה עגול וחלק ולא מדורג/משונן
+            approx = cv2.approxPolyDP(c, epsilon=smoothing, closed=True)
+
+            pts = [px_to_mm(p[0]) for p in approx]
+
+            if len(pts) > 2:
+                msp.add_lwpolyline(pts, close=True, dxfattribs={"color": 7})
+
+        doc.saveas(out_path)

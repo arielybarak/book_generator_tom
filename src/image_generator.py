@@ -180,17 +180,10 @@ def images_to_dxf(image_location, text_location, braille_location):
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    # 1. עיבוי הקווים בתמונה המקורית כדי לשמור על פרטים בלי שיישברו בתלת-ממד
-    imf.thicken_png_lines(image_location, thickness=8)
+    # שימוש בפונקציה החדשה והחלקה - מייצרת DXF ישירות מה-PNG המקורי
+    imf.create_smooth_dxf_from_png(image_location, dxf_image, smoothing=0.3)
 
-    # 2. יצירת ה-DXF המקורי של התמונה (עם פישוט 0.8 למניעת "מדרגות" בשוליים)
-    imf.image_to_dxf_exact(image_location, dxf_image, simplify_epsilon=0.8)
-
-    # ---> כאן אנחנו מחזירים את מנגנון הריפוי! <---
-    # המנגנון ייקח את ה-DXF המקוטע, יעטוף אותו לקו מתאר חיצוני אחד רציף וידרוס את הקובץ
-    imf.heal_dxf_fragments(dxf_image, dxf_image)
-
-    # 3. המרת טקסט וברייל ל-DXF
+    # המרת טקסט וברייל ל-DXF
     imf.png_to_dxf(text_location, dxf_text)
     imf.png_to_dxf(braille_location, dxf_braille)
 
