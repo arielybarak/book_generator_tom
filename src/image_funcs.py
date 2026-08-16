@@ -54,10 +54,11 @@ def convert_tensor_to_pil_img(tensor):
 
 
 # ── Image → DXF ────────────────────────────────────────────────────────────────
-def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=20.0, simplify_epsilon=1.5):
+def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=2.0, simplify_epsilon=0.8):
     """
-    מנגנון "אריזת וואקום" (Shrink-Wrap): מנפח את כל המקטעים עד למיזוג מלא,
-    מוצא את קו המתאר החיצוני ביותר, ומכווץ חזרה. מבטיח צורה אחת סגורה ורציפה.
+    גרסה חדשה למנגנון הריפוי:
+    קוראת את ה-DXF המקוטע, מעבה את כל הקווים משמעותית כדי שישרדו הדפסת
+    תלת-ממד (קירות עבים ורציפים), אבל *שומרת* על כל הפרטים הפנימיים.
     """
     import ezdxf
     import numpy as np
@@ -90,46 +91,31 @@ def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=20.0, simplify_epsilon=
     def to_px(x, y):
         return int((x - min_x) * ppm) + 50, int((y - min_y) * ppm) + 50
 
-    # 1. ציור כל המקטעים השבורים בעובי ראשוני
+    # 1. ציור כל הקווים מחדש בעובי משמעותי כדי שיהפכו לקירות יציבים
+    # עובי 25 פיקסלים מתורגם לקיר בשרני של 2.5 מ"מ
     for entity in msp:
         if entity.dxftype() == 'LWPOLYLINE':
             pts = [to_px(p[0], p[1]) for p in entity.get_points('xy')]
             pts_arr = np.array(pts, np.int32)
-            cv2.fillPoly(canvas, [pts_arr], 255)
-            cv2.polylines(canvas, [pts_arr], True, 255, thickness=6)
+            # ללא מילוי פנימי (False) כדי לשמור על העיניים של החתול!
+            cv2.polylines(canvas, [pts_arr], False, 255, thickness=25)
 
-    # 2. שלב הניפוח (Dilation) - ממזג הכל לגוש אחד
-    gap_px = int(max_gap_mm * ppm)
-    kernel_size = min(gap_px, 150)  # הגבלה כדי לא להעמיס על הזיכרון
-    if kernel_size % 2 == 0:
-        kernel_size += 1
+    # 2. החלקה קלה כדי שהקווים יהיו נעימים למגע
+    canvas = cv2.GaussianBlur(canvas, (5, 5), 0)
+    _, canvas = cv2.threshold(canvas, 127, 255, cv2.THRESH_BINARY)
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-    fused = cv2.dilate(canvas, kernel, iterations=1)
-
-    # 3. מילוי חורים פנימיים לחלוטין (מבטיח שלא יהיו חורים בתוך החתול)
-    contours, _ = cv2.findContours(fused, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    fused_filled = np.zeros_like(fused)
-    cv2.fillPoly(fused_filled, contours, 255)
-
-    # 4. שלב הכיווץ חזרה (Erosion) - מחזיר את הצורה לגודל המקורי
-    restored = cv2.erode(fused_filled, kernel, iterations=1)
-
-    # החלקה אחרונה למראה טבעי ונעים למגע
-    restored = cv2.GaussianBlur(restored, (11, 11), 0)
-    _, restored = cv2.threshold(restored, 127, 255, cv2.THRESH_BINARY)
-
-    # 5. חילוץ ושמירת קו המתאר *החיצוני היחיד* ל-DXF
-    final_contours, _ = cv2.findContours(restored, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
+    # 3. מציאת המתאר - הפעם מחפשים את הכל (RETR_LIST) ולא רק את המסגרת
+    final_contours, _ = cv2.findContours(canvas, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_KCOS)
 
     new_doc = ezdxf.new(setup=True)
     new_doc.units = ezdxf.units.MM
     new_msp = new_doc.modelspace()
 
-    # ניקח רק את הצורה הגדולה ביותר כדי לסנן לכלוכים שנותרו בחוץ
-    if final_contours:
-        largest_contour = max(final_contours, key=cv2.contourArea)
-        approx = cv2.approxPolyDP(largest_contour, epsilon=simplify_epsilon * ppm, closed=True)
+    for c in final_contours:
+        if cv2.contourArea(c) < 300:  # סינון חלקיקים מיקרוסקופיים
+            continue
+
+        approx = cv2.approxPolyDP(c, epsilon=simplify_epsilon * ppm, closed=True)
         dxf_pts = []
         for p in approx:
             px, py = p[0]
