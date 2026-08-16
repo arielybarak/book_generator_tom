@@ -168,22 +168,29 @@ def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0, 
     if img.dtype != np.uint8:
         img = img.astype(np.uint8)
 
-    # We want white object/lines on black background
-    if np.mean(img) > 127:
-        img = cv2.bitwise_not(img)
+        # We want white object/lines on black background
+        if np.mean(img) > 127:
+            img = cv2.bitwise_not(img)
 
-    _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
+        _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
 
-    # Smooth pixel staircase before contour extraction
-    # Upscaling gives the contour more room to become smooth.
-    upscale = 4
-    bin_img = cv2.resize(
-        bin_img,
-        None,
-        fx=upscale,
-        fy=upscale,
-        interpolation=cv2.INTER_CUBIC,
-    )
+        # ---------------------------------------------------------
+        # התיקון החדש: עיבוי אגרסיבי של הקווים לסגירת כל החורים!
+        # השתמשנו בקרנל של 7x7 שילחים את כל המקטעים השבורים.
+        # ---------------------------------------------------------
+        thick_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        bin_img = cv2.dilate(bin_img, thick_kernel, iterations=1)
+        # ---------------------------------------------------------
+
+        # Smooth pixel staircase before contour extraction
+        upscale = 4
+        bin_img = cv2.resize(
+            bin_img,
+            None,
+            fx=upscale,
+            fy=upscale,
+            interpolation=cv2.INTER_CUBIC,
+        )
 
     # Blur + threshold removes jagged pixel steps
     bin_img = cv2.GaussianBlur(bin_img, (5, 5), 0)
