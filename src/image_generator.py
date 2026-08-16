@@ -185,7 +185,7 @@ def images_to_dxf(image_location, text_location, braille_location):
     imf.image_to_dxf_exact(image_location, dxf_image)
 
     # 2. הוספת מנגנון הריפוי: קורא את ה-DXF שנוצר, מגשר על הרווחים, ודורס את הקובץ עם הגרסה הרציפה
-    imf.heal_dxf_fragments(dxf_image, dxf_image, max_gap_mm=20.0)
+    imf.heal_dxf_fragments(dxf_image, dxf_image, max_gap_mm=20.0, simplify_epsilon=0.1)
 
     # 3. המרת טקסט וברייל ל-DXF (אותם אנחנו לא מתקנים כי הם נוצרים מראש בצורה וקטורית אחידה)
     imf.png_to_dxf(text_location, dxf_text)
