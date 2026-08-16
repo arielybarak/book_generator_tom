@@ -505,6 +505,7 @@ def thicken_png_lines(image_path, thickness=6):
     קורא את תמונת ה-PNG, מעבה את הקווים השחורים, ושומר חזרה.
     זה שומר על הפרטים הפנימיים (כמו עיניים) אבל מונע שבירה של קווים דקים ב-DXF.
     """
+    import cv2
     img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
     if img is None:
         return

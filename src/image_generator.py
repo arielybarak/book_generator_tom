@@ -180,14 +180,15 @@ def images_to_dxf(image_location, text_location, braille_location):
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    # 1. עיבוי עדין (אופציונלי) למקרה שהקווים ב-PNG דקים מדי להדפסה בתלת-ממד
-    # אם ה-PNG שלך ממש מושלם ועבה, אפשר אפילו לשים פה סולמית (#) בתחילת השורה כדי לבטל את זה
+    # 1. עיבוי הקווים בתמונה המקורית כדי לשמור על פרטים בלי שיישברו בתלת-ממד
     imf.thicken_png_lines(image_location, thickness=6)
 
-    # 2. יצירת ה-DXF של הציור בעזרת הפונקציה החדשה והמדויקת שלנו (אחד-לאחד כמו ה-PNG)
-    imf.image_to_dxf_solid(image_location, dxf_image)
+    # 2. יצירת ה-DXF המקורי של התמונה (עם פישוט 0.8 למניעת "מדרגות" בשוליים)
+    imf.image_to_dxf_exact(image_location, dxf_image, simplify_epsilon=0.8)
 
-    # 3. המרת טקסט וברייל ל-DXF כרגיל
+    # (הסרנו בכוונה את heal_dxf_fragments כדי לא להרוס פרטים פנימיים בציור)
+
+    # 3. המרת טקסט וברייל ל-DXF
     imf.png_to_dxf(text_location, dxf_text)
     imf.png_to_dxf(braille_location, dxf_braille)
 
