@@ -523,8 +523,9 @@ def thicken_png_lines(image_path, thickness=6):
 
 def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
     """
-    ממיר PNG ל-DXF של צורות אטומות.
-    כולל מסננים חכמים למניעת זיהוי של מסגרת התמונה ולמניעת קריסות של הרינדור בתלת-ממד.
+    גרסה סופית ונקייה:
+    מעתיקה את ה-PNG אחד-לאחד ללא קיטועים, שומרת על נאמנות מקסימלית למקור,
+    ומסננת אוטומטית את המסגרת של התמונה.
     """
     import cv2
     import numpy as np
@@ -532,40 +533,42 @@ def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
 
     canvas_mm = canvas_cm * 10.0
 
+    # 1. קריאת ה-PNG המושלם שלך
     img = cv2.imread(str(png_path), cv2.IMREAD_GRAYSCALE)
     if img is None:
         print(f"Error loading {png_path}")
         return
 
-    # הופך את הציור השחור ללבן ואת הרקע לשחור
+    # 2. הפיכה לשחור-לבן מוחלט (קווים לבנים, רקע שחור)
     _, bw = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY_INV)
 
-    # שימוש ב-RETR_LIST במקום TREE פשוט אוסף את כל הצורות בצורה "שטוחה" - הכי בטוח ל-OpenSCAD
-    contours, _ = cv2.findContours(bw, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-
+    # 3. מציאת קווי המתאר (RETR_TREE שומר גם על חורים פנימיים כדי שזה לא יהיה סתם גוש)
+    contours, _ = cv2.findContours(bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return
 
     h_img, w_img = bw.shape
     valid_contours = []
 
+    # 4. סינון מסגרת ורעש
     for c in contours:
         x, y, w, h = cv2.boundingRect(c)
 
-        # 1. סינון המסגרת (הקריטי ביותר!): מדלגים על קווי מתאר שהם בגודל של כמעט כל התמונה
-        if w > w_img * 0.95 or h > h_img * 0.95:
+        # אם זה תופס כמעט את כל התמונה - זו המסגרת החיצונית, נדלג עליה!
+        if w > w_img * 0.95 and h > h_img * 0.95:
             continue
 
-        # 2. סינון אבק ורעשים קטנים שלא יהפכו לגושים בגלל ה-Scale
-        if cv2.contourArea(c) < 50:
+        # אם זה לכלוך של פחות מ-10 פיקסלים - נדלג עליו
+        if cv2.contourArea(c) < 10:
             continue
 
         valid_contours.append(c)
 
     if not valid_contours:
-        print(f"No valid contours found in {png_path} after filtering out background frame.")
+        print("No valid drawing found after filtering.")
         return
 
+    # 5. חישוב גבולות הציור האמיתי (בלי המסגרת) כדי למרכז אותו נכון על הלוח
     all_pts = np.vstack([c.reshape(-1, 2) for c in valid_contours])
     min_x, min_y = all_pts.min(axis=0)
     max_x, max_y = all_pts.max(axis=0)
@@ -573,29 +576,26 @@ def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
     w_px = max_x - min_x + 1
     h_px = max_y - min_y + 1
 
-    # 3. הגנה: אם הציור שנשאר הוא מיקרוסקופי, אל תנסה להגדיל אותו ללוח ענק
-    if w_px < 10 or h_px < 10:
-        print("Drawing is too small, skipping DXF export to avoid artifacts.")
-        return
-
     scale = canvas_mm / max(w_px, h_px)
     offset_x = (canvas_mm - w_px * scale) / 2
     offset_y = (canvas_mm - h_px * scale) / 2
-
-    def px_to_mm(p):
-        return (float((p[0] - min_x) * scale + offset_x),
-                float((max_y - p[1]) * scale + offset_y))
 
     doc = ezdxf.new(setup=True)
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
 
+    # 6. יצירת ה-DXF
     for c in valid_contours:
-        # הקטנו את ה-epsilon ל-1.0: זה עדיין מפחית 80% מהנקודות המיותרות כדי שלא לחנוק את התוכנה,
-        # אבל מונע מקווים "לחתוך אחד את השני" - מה שגרם לתוכנת התלת-ממד למחוק את הצורה!
-        approx = cv2.approxPolyDP(c, epsilon=1.0, closed=True)
+        # epsilon=0.5 שומר על צורה זהה כמעט ב-100% ל-PNG
+        approx = cv2.approxPolyDP(c, epsilon=0.5, closed=True)
 
-        pts = [px_to_mm(p[0]) for p in approx]
+        pts = []
+        for p in approx:
+            px, py = p[0]
+            mx = float((px - min_x) * scale + offset_x)
+            my = float((max_y - py) * scale + offset_y)
+            pts.append((mx, my))
+
         if len(pts) > 2:
             msp.add_lwpolyline(pts, close=True)
 

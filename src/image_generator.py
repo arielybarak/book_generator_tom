@@ -162,7 +162,7 @@ def create_images(
     plt.text(0.5, 0.1, display_text, fontsize=dynamic_fontsize, color='black',
              ha='center', va='center', fontweight='light', fontname='DejaVu Sans')
     plt.axis("off")
-    plt.savefig(text_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
+    plt.savefig(text_output_location, dpi=250, bbox_inches="tight", pad_inches=0)
     plt.close()
 
     # שמירת ברייל PNG
@@ -174,22 +174,20 @@ def create_images(
     plt.savefig(braille_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
     plt.close()
 
-
 def images_to_dxf(image_location, text_location, braille_location):
     """Convert the three PNGs produced by create_images() to DXF files."""
     dxf_image = str(image_location).replace('.png', '.dxf')
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    # 1. עיבוי הקווים בתמונה המקורית כדי לשמור על פרטים בלי שיישברו בתלת-ממד
-    imf.thicken_png_lines(image_location, thickness=8)
+    # 1. עיבוי עדין (אופציונלי) למקרה שהקווים ב-PNG דקים מדי להדפסה בתלת-ממד
+    # אם ה-PNG שלך ממש מושלם ועבה, אפשר אפילו לשים פה סולמית (#) בתחילת השורה כדי לבטל את זה
+    imf.thicken_png_lines(image_location, thickness=6)
 
-    # 2. יצירת ה-DXF המקורי - הפונקציה הזו כבר מנקה, מעבה וסוגרת חורים בצורה מושלמת!
-    imf.image_to_dxf_exact(image_location, dxf_image, simplify_epsilon=0.8)
+    # 2. יצירת ה-DXF של הציור בעזרת הפונקציה החדשה והמדויקת שלנו (אחד-לאחד כמו ה-PNG)
+    imf.image_to_dxf_solid(image_location, dxf_image)
 
-    # (מחקנו את heal_dxf_fragments שהייתה מרוקנת את הקובץ בגלל כפילות)
-
-    # 3. המרת טקסט וברייל ל-DXF
+    # 3. המרת טקסט וברייל ל-DXF כרגיל
     imf.png_to_dxf(text_location, dxf_text)
     imf.png_to_dxf(braille_location, dxf_braille)
 
