@@ -54,7 +54,7 @@ def convert_tensor_to_pil_img(tensor):
 
 
 # ── Image → DXF ────────────────────────────────────────────────────────────────
-def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=10.0, simplify_epsilon=1.5):
+def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=35.0, simplify_epsilon=1.5):
     """
     מנגנון אקסטרה: קורא קובץ DXF קיים עם קווים מקוטעים/בלוקים מופרדים,
     מגשר על הרווחים, ומייצר קובץ DXF חדש עם מתאר רציף ונקי.
