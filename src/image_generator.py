@@ -181,7 +181,7 @@ def images_to_dxf(image_location, text_location, braille_location):
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
     # 1. עיבוי הקווים בתמונה המקורית כדי לשמור על פרטים בלי שיישברו בתלת-ממד
-    imf.thicken_png_lines(image_location, thickness=6)
+    imf.thicken_png_lines(image_location, thickness=8)
 
     # 2. יצירת ה-DXF המקורי של התמונה (עם פישוט 0.8 למניעת "מדרגות" בשוליים)
     imf.image_to_dxf_exact(image_location, dxf_image, simplify_epsilon=0.8)
