@@ -524,7 +524,7 @@ def thicken_png_lines(image_path, thickness=6):
 def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
     """
     ממיר PNG ל-DXF של צורות אטומות.
-    כולל מנגנון פישוט חכם שמונע מתוכנת התלת-ממד לקרוס ולהעלים את הציור.
+    כולל מסננים חכמים למניעת זיהוי של מסגרת התמונה ולמניעת קריסות של הרינדור בתלת-ממד.
     """
     import cv2
     import numpy as np
@@ -537,18 +537,33 @@ def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
         print(f"Error loading {png_path}")
         return
 
-    # הופך את הציור השחור ללבן ואת הרקע לשחור (כדי שהתוכנה תזהה את החומר)
+    # הופך את הציור השחור ללבן ואת הרקע לשחור
     _, bw = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY_INV)
 
-    # שימוש ב-RETR_TREE כדי לשמור על החורים (כמו בתוך עיניים או אותיות)
-    contours, _ = cv2.findContours(bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    # שימוש ב-RETR_LIST במקום TREE פשוט אוסף את כל הצורות בצורה "שטוחה" - הכי בטוח ל-OpenSCAD
+    contours, _ = cv2.findContours(bw, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
     if not contours:
         return
 
-    # סינון לכלוכים זעירים ברקע שיכולים לשבש את ההדפסה
-    valid_contours = [c for c in contours if cv2.contourArea(c) > 30]
+    h_img, w_img = bw.shape
+    valid_contours = []
+
+    for c in contours:
+        x, y, w, h = cv2.boundingRect(c)
+
+        # 1. סינון המסגרת (הקריטי ביותר!): מדלגים על קווי מתאר שהם בגודל של כמעט כל התמונה
+        if w > w_img * 0.95 or h > h_img * 0.95:
+            continue
+
+        # 2. סינון אבק ורעשים קטנים שלא יהפכו לגושים בגלל ה-Scale
+        if cv2.contourArea(c) < 50:
+            continue
+
+        valid_contours.append(c)
+
     if not valid_contours:
+        print(f"No valid contours found in {png_path} after filtering out background frame.")
         return
 
     all_pts = np.vstack([c.reshape(-1, 2) for c in valid_contours])
@@ -557,6 +572,11 @@ def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
 
     w_px = max_x - min_x + 1
     h_px = max_y - min_y + 1
+
+    # 3. הגנה: אם הציור שנשאר הוא מיקרוסקופי, אל תנסה להגדיל אותו ללוח ענק
+    if w_px < 10 or h_px < 10:
+        print("Drawing is too small, skipping DXF export to avoid artifacts.")
+        return
 
     scale = canvas_mm / max(w_px, h_px)
     offset_x = (canvas_mm - w_px * scale) / 2
@@ -571,9 +591,9 @@ def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
     msp = doc.modelspace()
 
     for c in valid_contours:
-        # כאן טמון הקסם: approxPolyDP מפחיתה דרמטית את כמות הנקודות
-        # (epsilon=1.5 הוא איזון מושלם שלא מעוות את הציור אבל מרגיע את התלת-ממד)
-        approx = cv2.approxPolyDP(c, epsilon=1.5, closed=True)
+        # הקטנו את ה-epsilon ל-1.0: זה עדיין מפחית 80% מהנקודות המיותרות כדי שלא לחנוק את התוכנה,
+        # אבל מונע מקווים "לחתוך אחד את השני" - מה שגרם לתוכנת התלת-ממד למחוק את הצורה!
+        approx = cv2.approxPolyDP(c, epsilon=1.0, closed=True)
 
         pts = [px_to_mm(p[0]) for p in approx]
         if len(pts) > 2:
