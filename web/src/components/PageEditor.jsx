@@ -18,6 +18,7 @@ export function PageEditor({ onAdd }) {
   const [showNikud, setShowNikud] = useState(false)
 
   const [imageMode, setImageMode] = useState('generate') // 'generate' | 'upload' | 'none'
+  const [attempted, setAttempted] = useState(false) // reveal "required" only after a submit try
   const [upload, setUpload] = useState('') // compressed data URL
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadError, setUploadError] = useState('')
@@ -40,6 +41,7 @@ export function PageEditor({ onAdd }) {
     setVariations({})
     setShowNikud(false)
     setImageMode('generate')
+    setAttempted(false)
     setUpload('')
     setUploadError('')
     if (fileRef.current) fileRef.current.value = ''
@@ -78,10 +80,14 @@ export function PageEditor({ onAdd }) {
   // Picture description drives the auto-drawing prompt — keep it to <=2 words.
   const pictureWordCount = picture.trim() ? picture.trim().split(/\s+/).length : 0
   const pictureTooLong = imageMode === 'generate' && pictureWordCount > 2
+  // Generate mode needs the prompt — require at least one word.
+  const pictureMissing = imageMode === 'generate' && pictureWordCount < 1
+  const showPictureRequired = pictureMissing && attempted
 
   function submit(e) {
     e.preventDefault()
-    if (!text.trim() || uploadMissing || uploadBusy || pictureTooLong) return
+    setAttempted(true)
+    if (!text.trim() || uploadMissing || uploadBusy || pictureTooLong || pictureMissing) return
     onAdd({
       text: text.trim(),
       picture: picture.trim(),
@@ -173,15 +179,17 @@ export function PageEditor({ onAdd }) {
             value={picture}
             onChange={(e) => setPicture(e.target.value)}
             placeholder={t.builder.picturePlaceholder}
-            aria-invalid={pictureTooLong}
-            aria-describedby={pictureTooLong ? 'page-picture-err' : undefined}
+            aria-invalid={pictureTooLong || showPictureRequired}
+            aria-describedby={pictureTooLong || showPictureRequired ? 'page-picture-err' : undefined}
             className={`bg-surface w-full rounded-2xl border px-4 py-3 text-lg outline-none ${
-              pictureTooLong ? 'border-red-500 focus:border-red-500' : 'border-line focus:border-brand'
+              pictureTooLong || showPictureRequired
+                ? 'border-red-500 focus:border-red-500'
+                : 'border-line focus:border-brand'
             }`}
           />
-          {pictureTooLong && (
+          {(pictureTooLong || showPictureRequired) && (
             <p id="page-picture-err" role="alert" className="mt-1 text-sm text-red-600">
-              {t.builder.pictureTooLong}
+              {pictureTooLong ? t.builder.pictureTooLong : t.builder.pictureRequired}
             </p>
           )}
         </div>
