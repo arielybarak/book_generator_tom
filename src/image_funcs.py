@@ -10,9 +10,8 @@ Responsibilities:
 - generate_braille_dxf_from_text(): Braille unicode → PNG → blob detection → DXF circles
 - png_to_dxf(): generic PNG file → DXF via external contour extraction
 - plot_dxf(): quick matplotlib preview of any DXF file
-- thicken_png_lines(): thicken lines in a PNG image
-- image_to_dxf_solid(): robustly convert PNG with solid lines to DXF
 """
+
 import os
 import uuid
 import urllib.request
@@ -56,12 +55,16 @@ def convert_tensor_to_pil_img(tensor):
 
 
 # ── Image → DXF ────────────────────────────────────────────────────────────────
-def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=2.0, simplify_epsilon=0.8):
+
+def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=20.0, simplify_epsilon=1.5):
     """
-    גרסה חדשה למנגנון הריפוי:
-    קוראת את ה-DXF המקוטע, מעבה את כל הקווים משמעותית כדי שישרדו הדפסת
-    תלת-ממד (קירות עבים ורציפים), אבל *שומרת* על כל הפרטים הפנימיים.
+    מנגנון "אריזת וואקום" (Shrink-Wrap): מנפח את כל המקטעים עד למיזוג מלא,
+    מוצא את קו המתאר החיצוני ביותר, ומכווץ חזרה. מבטיח צורה אחת סגורה ורציפה.
     """
+    import ezdxf
+    import numpy as np
+    import cv2
+
     try:
         doc = ezdxf.readfile(input_dxf)
     except IOError:
@@ -89,31 +92,46 @@ def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=2.0, simplify_epsilon=0
     def to_px(x, y):
         return int((x - min_x) * ppm) + 50, int((y - min_y) * ppm) + 50
 
-    # 1. ציור כל הקווים מחדש בעובי משמעותי כדי שיהפכו לקירות יציבים
-    # עובי 25 פיקסלים מתורגם לקיר בשרני של 2.5 מ"מ
+    # 1. ציור כל המקטעים השבורים בעובי ראשוני
     for entity in msp:
         if entity.dxftype() == 'LWPOLYLINE':
             pts = [to_px(p[0], p[1]) for p in entity.get_points('xy')]
             pts_arr = np.array(pts, np.int32)
-            # ללא מילוי פנימי (False) כדי לשמור על העיניים של החתול!
-            cv2.polylines(canvas, [pts_arr], False, 255, thickness=25)
+            cv2.fillPoly(canvas, [pts_arr], 255)
+            cv2.polylines(canvas, [pts_arr], True, 255, thickness=6)
 
-    # 2. החלקה קלה כדי שהקווים יהיו נעימים למגע
-    canvas = cv2.GaussianBlur(canvas, (5, 5), 0)
-    _, canvas = cv2.threshold(canvas, 127, 255, cv2.THRESH_BINARY)
+    # 2. שלב הניפוח (Dilation) - ממזג הכל לגוש אחד
+    gap_px = int(max_gap_mm * ppm)
+    kernel_size = min(gap_px, 150)  # הגבלה כדי לא להעמיס על הזיכרון
+    if kernel_size % 2 == 0:
+        kernel_size += 1
 
-    # 3. מציאת המתאר - הפעם מחפשים את הכל (RETR_LIST) ולא רק את המסגרת
-    final_contours, _ = cv2.findContours(canvas, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_KCOS)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    fused = cv2.dilate(canvas, kernel, iterations=1)
+
+    # 3. מילוי חורים פנימיים לחלוטין (מבטיח שלא יהיו חורים בתוך החתול)
+    contours, _ = cv2.findContours(fused, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    fused_filled = np.zeros_like(fused)
+    cv2.fillPoly(fused_filled, contours, 255)
+
+    # 4. שלב הכיווץ חזרה (Erosion) - מחזיר את הצורה לגודל המקורי
+    restored = cv2.erode(fused_filled, kernel, iterations=1)
+
+    # החלקה אחרונה למראה טבעי ונעים למגע
+    restored = cv2.GaussianBlur(restored, (11, 11), 0)
+    _, restored = cv2.threshold(restored, 127, 255, cv2.THRESH_BINARY)
+
+    # 5. חילוץ ושמירת קו המתאר *החיצוני היחיד* ל-DXF
+    final_contours, _ = cv2.findContours(restored, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
 
     new_doc = ezdxf.new(setup=True)
     new_doc.units = ezdxf.units.MM
     new_msp = new_doc.modelspace()
 
-    for c in final_contours:
-        if cv2.contourArea(c) < 300:  # סינון חלקיקים מיקרוסקופיים
-            continue
-
-        approx = cv2.approxPolyDP(c, epsilon=simplify_epsilon * ppm, closed=True)
+    # ניקח רק את הצורה הגדולה ביותר כדי לסנן לכלוכים שנותרו בחוץ
+    if final_contours:
+        largest_contour = max(final_contours, key=cv2.contourArea)
+        approx = cv2.approxPolyDP(largest_contour, epsilon=simplify_epsilon * ppm, closed=True)
         dxf_pts = []
         for p in approx:
             px, py = p[0]
@@ -125,6 +143,7 @@ def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=2.0, simplify_epsilon=0
             new_msp.add_lwpolyline(dxf_pts, close=True, dxfattribs={"color": 7})
 
     new_doc.saveas(output_dxf)
+
 
 def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0, bridge_gaps=True):
     """
@@ -152,29 +171,22 @@ def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0, 
     if img.dtype != np.uint8:
         img = img.astype(np.uint8)
 
-        # We want white object/lines on black background
-        if np.mean(img) > 127:
-            img = cv2.bitwise_not(img)
+    # We want white object/lines on black background
+    if np.mean(img) > 127:
+        img = cv2.bitwise_not(img)
 
-        _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
+    _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
 
-        # ---------------------------------------------------------
-        # התיקון החדש: עיבוי אגרסיבי של הקווים לסגירת כל החורים!
-        # השתמשנו בקרנל של 7x7 שילחים את כל המקטעים השבורים.
-        # ---------------------------------------------------------
-        thick_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-        bin_img = cv2.dilate(bin_img, thick_kernel, iterations=1)
-        # ---------------------------------------------------------
-
-        # Smooth pixel staircase before contour extraction
-        upscale = 4
-        bin_img = cv2.resize(
-            bin_img,
-            None,
-            fx=upscale,
-            fy=upscale,
-            interpolation=cv2.INTER_CUBIC,
-        )
+    # Smooth pixel staircase before contour extraction
+    # Upscaling gives the contour more room to become smooth.
+    upscale = 4
+    bin_img = cv2.resize(
+        bin_img,
+        None,
+        fx=upscale,
+        fy=upscale,
+        interpolation=cv2.INTER_CUBIC,
+    )
 
     # Blur + threshold removes jagged pixel steps
     bin_img = cv2.GaussianBlur(bin_img, (5, 5), 0)
@@ -250,6 +262,7 @@ def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0, 
 
     doc.saveas(out_path)
 
+
 def process_image_to_dxf(img_array, output_path, canvas_cm=150):
     """
     Convert a raw colour numpy image (from Stable Diffusion) to a DXF.
@@ -257,8 +270,8 @@ def process_image_to_dxf(img_array, output_path, canvas_cm=150):
     """
     canvas_mm = canvas_cm * 10.0
 
-    gray  = cv2.cvtColor(img_array, cv2.COLOR_BGR2GRAY)
-    blur  = cv2.GaussianBlur(gray, (7, 7), 0)
+    gray = cv2.cvtColor(img_array, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (7, 7), 0)
     binary = cv2.adaptiveThreshold(
         blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 3
     )
@@ -275,8 +288,8 @@ def process_image_to_dxf(img_array, output_path, canvas_cm=150):
         if cv2.contourArea(cnt) < 80:
             continue
         epsilon = 0.01 * cv2.arcLength(cnt, False)
-        approx  = cv2.approxPolyDP(cnt, epsilon, False)
-        points  = [(float(p[0][0]), float(height - p[0][1])) for p in approx]
+        approx = cv2.approxPolyDP(cnt, epsilon, False)
+        points = [(float(p[0][0]), float(height - p[0][1])) for p in approx]
         if len(points) > 2:
             msp.add_lwpolyline(points, close=False, dxfattribs={'color': 7})
 
@@ -284,42 +297,19 @@ def process_image_to_dxf(img_array, output_path, canvas_cm=150):
 
 
 def png_to_dxf(png_path, dxf_path, canvas_cm=150):
-    """
-    Convert a generic PNG file (like text or braille) to a DXF using robust contour extraction.
-    Ensures correct Y-axis inversion, correct color handling, and captures inner holes.
-    """
+    """Convert a PNG file to a DXF using external contour extraction."""
     canvas_mm = canvas_cm * 10.0
 
-    img = cv2.imread(str(png_path), cv2.IMREAD_GRAYSCALE)
+    img = cv2.imread(png_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise RuntimeError(f"Could not load {png_path}")
 
-    # הפיכת הקווים השחורים ללבנים (אחרת אלגוריתם הקונטורים לא יזהה כלום)
     _, bw = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY_INV)
-
-    # RETR_TREE מוודא שגם חורים בתוך האותיות/צורות נתפסים
-    contours, _ = cv2.findContours(bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-
+    contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not contours:
         raise RuntimeError(f"No contours found in {png_path}")
 
-    h_img, w_img = bw.shape
-    valid_contours = []
-
-    for c in contours:
-        x, y, w, h = cv2.boundingRect(c)
-        # התעלמות מהמסגרת של כל התמונה אם נתפסה בטעות
-        if w > w_img * 0.95 and h > h_img * 0.95 and x < 5 and y < 5:
-            continue
-        if cv2.contourArea(c) < 5:
-            continue
-        valid_contours.append(c)
-
-    if not valid_contours:
-        print(f"Warning: no valid contours after filtering for {png_path}")
-        return
-
-    all_pts = np.vstack([c.reshape(-1, 2) for c in valid_contours])
+    all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
     min_x, min_y = all_pts.min(axis=0)
     max_x, max_y = all_pts.max(axis=0)
     w_px = max_x - min_x + 1
@@ -329,49 +319,52 @@ def png_to_dxf(png_path, dxf_path, canvas_cm=150):
     offset_x = (canvas_mm - w_px * scale) / 2
     offset_y = (canvas_mm - h_px * scale) / 2
 
-    # יצירת קובץ DXF תקני בפורמט שנתמך על ידי רוב התוכנות
-    doc = ezdxf.new('R2010', setup=True)
+    def px_to_mm(p):
+        return ((p[0] - min_x) * scale + offset_x,
+                (max_y - p[1]) * scale + offset_y)
+
+    doc = ezdxf.new(setup=True)
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
 
-    for c in valid_contours:
-        # דיוק מקסימלי עבור טקסט
-        approx = cv2.approxPolyDP(c, epsilon=0.0, closed=True)
-        pts = []
-        for p in approx:
-            mx = float((p[0][0] - min_x) * scale + offset_x)
-            # היפוך ציר Y של התמונה!
-            my = float((max_y - p[0][1]) * scale + offset_y)
-            pts.append((mx, my))
-
-        if len(pts) > 2:
+    for c in contours:
+        pts = [px_to_mm(p[0]) for p in c]
+        if len(pts) > 1:
             msp.add_lwpolyline(pts, close=True)
 
-    doc.saveas(str(dxf_path))
+    doc.saveas(dxf_path)
 
 
 def clean_uploaded_image_to_png(src_path, out_png_path, max_side=1600):
     """
     Best-effort cleanup of a *user-supplied* drawing (phone photo or scan, JPG or PNG)
     into a clean black-on-white line PNG that png_to_dxf() can trace.
+
+    Unlike png_to_dxf's fixed threshold (fine for crisp digital line art), a photo has
+    uneven lighting and paper texture, so we use an adaptive threshold + morphology +
+    despeckle. Output is dark lines on a white ground (what png_to_dxf expects).
     """
     img = cv2.imread(src_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise RuntimeError(f"Could not load uploaded image {src_path}")
 
+    # Downscale oversized photos — keeps tracing fast and stable (detail beyond this
+    # is noise for tactile line art anyway).
     h, w = img.shape[:2]
     if max(h, w) > max_side:
         s = max_side / float(max(h, w))
         img = cv2.resize(img, (int(round(w * s)), int(round(h * s))), interpolation=cv2.INTER_AREA)
 
     blur = cv2.GaussianBlur(img, (5, 5), 0)
+    # Dark strokes on light paper → INV gives white strokes on black for morphology.
     binary = cv2.adaptiveThreshold(
         blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 7
     )
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-    binary = cv2.medianBlur(binary, 3)
+    binary = cv2.medianBlur(binary, 3)  # drop isolated specks from paper grain
 
+    # png_to_dxf wants dark lines on white → invert back.
     cv2.imwrite(out_png_path, cv2.bitwise_not(binary))
     return out_png_path
 
@@ -379,12 +372,17 @@ def clean_uploaded_image_to_png(src_path, out_png_path, max_side=1600):
 def _filled_glyphs_to_dxf(image_bw, out_path, canvas_cm=150):
     """
     Convert a rendered-text image to a DXF of SOLID glyph outlines.
+
+    Unlike image_to_dxf_exact (which skeletonizes line-art to centerlines), text must
+    stay solid — skeletonizing letters leaves thin, broken strokes that barely read as
+    raised text. So we take the FILLED outer contours (RETR_EXTERNAL) of the letters and
+    export them as closed polylines, which dxf_3d then extrudes as solid raised glyphs.
     """
     canvas_mm = canvas_cm * 10.0
     img = image_bw.copy()
     if img.dtype != np.uint8:
         img = img.astype(np.uint8)
-    if np.mean(img) > 127:                       # want white glyphs on black
+    if np.mean(img) > 127:  # want white glyphs on black
         img = cv2.bitwise_not(img)
     _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
 
@@ -397,7 +395,7 @@ def _filled_glyphs_to_dxf(image_bw, out_path, canvas_cm=150):
     min_x, min_y = all_pts.min(axis=0)
     max_x, max_y = all_pts.max(axis=0)
     w_px, h_px = (max_x - min_x + 1), (max_y - min_y + 1)
-    scale    = canvas_mm / max(w_px, h_px)
+    scale = canvas_mm / max(w_px, h_px)
     offset_x = (canvas_mm - w_px * scale) / 2
     offset_y = (canvas_mm - h_px * scale) / 2
 
@@ -419,6 +417,7 @@ def _filled_glyphs_to_dxf(image_bw, out_path, canvas_cm=150):
 def generate_text_dxf(text, output_path, rtl=True):
     """
     Render text to a temp PNG via matplotlib, then export SOLID glyph outlines as DXF.
+    Hebrew is RTL (matplotlib has no bidi, so the string is reversed); English is LTR.
     """
     render_text = text[::-1] if rtl else text
     temp_img = f"temp_text_{uuid.uuid4()}.png"
@@ -446,15 +445,21 @@ def generate_hebrew_text_dxf(hebrew_text, output_path):
 
 
 # ── Braille geometry (Grade-1, millimetres) ───────────────────────────────────────
-BRAILLE_DOT_SPACING_MM  = 2.5
-BRAILLE_CELL_SPACING_MM = 6.0
-BRAILLE_DOT_RADIUS_MM   = 0.75
-
+# Fixed physical spacing, independent of word length. Cells are laid out left-to-right
+# (Hebrew Braille is read LTR). Dot size here only sets the DXF circle; dxf_3d overrides
+# the dome radius/height from config when building the STL.
+BRAILLE_DOT_SPACING_MM = 2.5  # between dots within a cell (horizontal & vertical)
+BRAILLE_CELL_SPACING_MM = 6.0  # between the same dot of adjacent cells
+BRAILLE_DOT_RADIUS_MM = 0.75
+# Unicode Braille bit (0–5) → (col, row) in the 2×3 cell; row 0 is the top row.
 _BRAILLE_DOT_CELL = {0: (0, 0), 1: (0, 1), 2: (0, 2), 3: (1, 0), 4: (1, 1), 5: (1, 2)}
+
 
 def generate_braille_dxf_from_text(braille_text, output_path):
     """
-    Emit Braille dots as DXF circles at FIXED Grade-1 spacing (mm).
+    Emit Braille dots as DXF circles at FIXED Grade-1 spacing (mm), computed directly
+    from the Unicode Braille string (U+2800–U+28FF). No PNG render / blob detection, so
+    spacing is correct regardless of word length, and there is no Braille-font dependency.
     """
     doc = ezdxf.new()
     doc.units = ezdxf.units.MM
@@ -462,13 +467,13 @@ def generate_braille_dxf_from_text(braille_text, output_path):
     dot = BRAILLE_DOT_SPACING_MM
     for i, ch in enumerate(braille_text):
         code = ord(ch) - 0x2800
-        if code < 0 or code > 0xFF:
+        if code < 0 or code > 0xFF:  # space / non-Braille — advance one cell, no dots
             continue
         x0 = i * BRAILLE_CELL_SPACING_MM
         for bit, (col, row) in _BRAILLE_DOT_CELL.items():
             if code & (1 << bit):
                 cx = x0 + col * dot
-                cy = (2 - row) * dot
+                cy = (2 - row) * dot  # y up: row 0 (top) is highest
                 msp.add_circle(center=(cx, cy), radius=BRAILLE_DOT_RADIUS_MM,
                                dxfattribs={'color': 7})
     doc.saveas(output_path)
@@ -489,12 +494,13 @@ def plot_dxf(dxf_path):
                 x = [p[0] for p in points]
                 y = [p[1] for p in points]
                 if entity.is_closed:
-                    x.append(x[0]); y.append(y[0])
+                    x.append(x[0])
+                    y.append(y[0])
                 plt.plot(x, y, color='black', linewidth=1)
             elif entity.dxftype() == 'CIRCLE':
                 cx, cy = entity.dxf.center.x, entity.dxf.center.y
-                r      = entity.dxf.radius
-                theta  = np.linspace(0, 2 * np.pi, 100)
+                r = entity.dxf.radius
+                theta = np.linspace(0, 2 * np.pi, 100)
                 plt.plot(cx + r * np.cos(theta), cy + r * np.sin(theta),
                          color='black', linewidth=1)
 
@@ -510,6 +516,7 @@ def thicken_png_lines(image_path, thickness=6):
     קורא את תמונת ה-PNG, מעבה את הקווים השחורים, ושומר חזרה.
     זה שומר על הפרטים הפנימיים (כמו עיניים) אבל מונע שבירה של קווים דקים ב-DXF.
     """
+    import cv2
     img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
     if img is None:
         return
@@ -524,83 +531,3 @@ def thicken_png_lines(image_path, thickness=6):
     # הופכים חזרה לשחור על לבן ושומרים
     final_img = cv2.bitwise_not(thickened)
     cv2.imwrite(str(image_path), final_img)
-
-
-def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
-    """
-    המרת תמונת ציור (PNG) ל-DXF תקני.
-    כולל עיבוי בזיכרון למניעת העלמות של קווים במנועי תלת-ממד.
-    """
-    canvas_mm = canvas_cm * 10.0
-
-    img = cv2.imread(str(png_path), cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        print(f"Error loading {png_path}")
-        return
-
-    # חובה להפוך צבעים לפני findContours
-    _, bw = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY_INV)
-
-    # >>> התיקון הקריטי למנוע ה-3D <<<
-    # אנו מעבים את הקווים רק בזיכרון כדי שה-DXF יהיה "בשרני"
-    # ולא יקרוס כשתוכנת התלת-ממד תנסה לנפח אותו. זה לא משנה את ה-PNG ששמור בדיסק!
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    bw = cv2.dilate(bw, kernel, iterations=1)
-
-    # חובה להשתמש ב-RETR_TREE כדי לא לאבד חורים פנימיים או פרטים קטנים
-    contours, _ = cv2.findContours(bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        print(f"No contours found for {png_path}")
-        return
-
-    h_img, w_img = bw.shape
-    valid_contours = []
-
-    for c in contours:
-        x, y, w, h = cv2.boundingRect(c)
-        # סינון ה-Bounding Box החיצוני אם הוא תופס את כל התמונה
-        if w > w_img * 0.95 and h > h_img * 0.95 and x < 5 and y < 5:
-            continue
-        # סינון רעשים נקודתיים (הגדלנו קצת את הסף בגלל העיבוי)
-        if cv2.contourArea(c) < 20:
-            continue
-
-        valid_contours.append(c)
-
-    if not valid_contours:
-        print("No valid drawing found after filtering.")
-        return
-
-    # מציאת גבולות אמיתיים להתאמת הקנבס ומרכוז
-    all_pts = np.vstack([c.reshape(-1, 2) for c in valid_contours])
-    min_x, min_y = all_pts.min(axis=0)
-    max_x, max_y = all_pts.max(axis=0)
-
-    w_px = max_x - min_x + 1
-    h_px = max_y - min_y + 1
-
-    scale = canvas_mm / max(w_px, h_px)
-    offset_x = (canvas_mm - w_px * scale) / 2
-    offset_y = (canvas_mm - h_px * scale) / 2
-
-    # R2010 יוצר תאימות עדיפה עם מרבית התוכנות בעולם
-    doc = ezdxf.new('R2010', setup=True)
-    doc.units = ezdxf.units.MM
-    msp = doc.modelspace()
-
-    for c in valid_contours:
-        # החלקה מתונה כדי למנוע הצטלבויות נוספות בפוליגון
-        approx = cv2.approxPolyDP(c, epsilon=1.0, closed=True)
-
-        pts = []
-        for p in approx:
-            px, py = p[0]
-            mx = float((px - min_x) * scale + offset_x)
-            # היפוך ציר Y: תמונות מתחילות למעלה, DXF מתחיל למטה
-            my = float((max_y - py) * scale + offset_y)
-            pts.append((mx, my))
-
-        if len(pts) > 2:
-            msp.add_lwpolyline(pts, close=True)
-
-    doc.saveas(str(dxf_path))

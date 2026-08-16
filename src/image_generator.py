@@ -76,7 +76,7 @@ def create_images(
     """
     imf.ensure_font()
 
-    eng_desc  = lf.hebrew_translator(raw_text)
+    eng_desc = lf.hebrew_translator(raw_text)
     eng_class = lf.hebrew_translator(image_desc)
 
     sd_cfg = cfg["stable_diffusion"]
@@ -136,13 +136,14 @@ def create_images(
     h, w = edges.shape
     edges[h - 1:h, w - 1:w] = 255
 
-    # צינטור התמונה
+    # צינטור התמונה (נשאר ללא שינוי)
     ys, xs = np.where(edges[1:h - 1, 1:w - 1] == 0)
     if len(xs) > 0:
         shift_x = int(w / 2 - xs.mean())
         shift_y = int(h / 2 - ys.mean())
     else:
         shift_x = shift_y = 0
+
     centered = cv2.warpAffine(
         edges, np.float32([[1, 0, shift_x], [0, 1, shift_y]]), (w, h), borderValue=255
     )
@@ -161,7 +162,7 @@ def create_images(
     plt.text(0.5, 0.1, display_text, fontsize=dynamic_fontsize, color='black',
              ha='center', va='center', fontweight='light', fontname='DejaVu Sans')
     plt.axis("off")
-    plt.savefig(text_output_location, dpi=250, bbox_inches="tight", pad_inches=0)
+    plt.savefig(text_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
     plt.close()
 
     # שמירת ברייל PNG
@@ -173,12 +174,6 @@ def create_images(
     plt.savefig(braille_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
     plt.close()
 
-    # ─────────────────────────────────────────────────────────────────
-    # >>> השורה הקריטית שהייתה חסרה! <<<
-    # מפעיל את ההמרה ל-DXF מיד אחרי שכל קובצי ה-PNG נוצרו ונשמרו בהצלחה
-    # ─────────────────────────────────────────────────────────────────
-    images_to_dxf(image_output_location, text_output_location, braille_output_location)
-
 
 def images_to_dxf(image_location, text_location, braille_location):
     """Convert the three PNGs produced by create_images() to DXF files."""
@@ -186,15 +181,16 @@ def images_to_dxf(image_location, text_location, braille_location):
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    print("Converting PNGs to DXF...")
+    # 1. עיבוי הקווים בתמונה המקורית כדי לשמור על פרטים בלי שיישברו בתלת-ממד
+    imf.thicken_png_lines(image_location, thickness=6)
 
-    # יצירת ה-DXF של הציור באמצעות הפונקציה החדשה והחזקה
-    imf.image_to_dxf_solid(image_location, dxf_image)
+    # 2. יצירת ה-DXF המקורי של התמונה (עם פישוט 0.8 למניעת "מדרגות" בשוליים)
+    imf.image_to_dxf_exact(image_location, dxf_image, simplify_epsilon=0.8)
 
-    # המרת טקסט וברייל ל-DXF (עם דיוק מקסימלי לאותיות)
+    # (הסרנו בכוונה את heal_dxf_fragments כדי לא להרוס פרטים פנימיים בציור)
+
+    # 3. המרת טקסט וברייל ל-DXF
     imf.png_to_dxf(text_location, dxf_text)
     imf.png_to_dxf(braille_location, dxf_braille)
-
-    print("DXF conversion completed successfully!")
 
     return dxf_image, dxf_text, dxf_braille
