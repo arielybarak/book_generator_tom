@@ -54,10 +54,15 @@ def convert_tensor_to_pil_img(tensor):
 
 
 # ── Image → DXF ────────────────────────────────────────────────────────────────
-def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=25.0, simplify_epsilon=1.5):
+def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=50.0, simplify_epsilon=1.5):
     """
-    מנגנון ריפוי משופר: מחבר פיזית קצוות של קווים פתוחים שקרובים זה לזה.
+    מנגנון ריפוי אגרסיבי: מוצא "איים" מנותקים בשרטוט ומחבר אותם פיזית
+    על ידי מתיחת גשרים בין הנקודות הקרובות ביותר שלהם, ללא תלות באם הקווים סגורים או פתוחים.
     """
+    import ezdxf
+    import numpy as np
+    import cv2
+
     try:
         doc = ezdxf.readfile(input_dxf)
     except IOError:
@@ -65,7 +70,6 @@ def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=25.0, simplify_epsilon=
         return
 
     msp = doc.modelspace()
-
     all_pts = []
     for entity in msp:
         if entity.dxftype() == 'LWPOLYLINE':
@@ -86,44 +90,61 @@ def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=25.0, simplify_epsilon=
     def to_px(x, y):
         return int((x - min_x) * ppm) + 50, int((y - min_y) * ppm) + 50
 
-    endpoints = []
-
-    # ציור המקטעים ואיסוף הקצוות הפתוחים
+    # 1. ציור כל המקטעים הקיימים כגושים אטומים
     for entity in msp:
         if entity.dxftype() == 'LWPOLYLINE':
             pts = [to_px(p[0], p[1]) for p in entity.get_points('xy')]
             pts_arr = np.array(pts, np.int32)
+            cv2.fillPoly(canvas, [pts_arr], 255)
+            cv2.polylines(canvas, [pts_arr], True, 255, thickness=8)
 
-            if entity.closed or len(pts) > 2:
-                cv2.fillPoly(canvas, [pts_arr], 255)
-            elif len(pts) == 2:
-                cv2.line(canvas, pts[0], pts[1], 255, thickness=4)
+    # 2. ── מנגנון חיבור איים (Islands Connection) ──
+    contours, _ = cv2.findContours(canvas, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-            # אם הפוליגון לא סגור, נשמור את הקצה הראשון והאחרון שלו למתיחת קווים
-            if not entity.closed and len(pts) >= 2:
-                endpoints.append(pts[0])
-                endpoints.append(pts[-1])
+    if len(contours) > 1:
+        # מיון לפי שטח - מהגדול לקטן
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
-    # ── מנגנון חיבור קצוות גיאומטרי ──
-    # מחפש קצוות פתוחים קרובים ומותח ביניהם קו המחבר את הנתק
-    gap_px = int(max_gap_mm * ppm)
-    for i in range(len(endpoints)):
-        for j in range(i + 1, len(endpoints)):
-            pt1 = np.array(endpoints[i])
-            pt2 = np.array(endpoints[j])
-            dist = np.linalg.norm(pt1 - pt2)
+        # נעבור על כל האיים הקטנים ונחבר אותם לאי המרכזי
+        for i in range(1, len(contours)):
+            if cv2.contourArea(contours[i]) < 10:  # התעלמות מלכלוכים מיקרוסקופיים
+                continue
 
-            if dist < gap_px:
-                # ציור הגשר (בעובי מעט גדול יותר כדי שיחליק יפה)
-                cv2.line(canvas, tuple(pt1), tuple(pt2), 255, thickness=6)
+            # לקיחת דגימת נקודות כדי להאיץ את החישוב
+            pts_main = np.vstack(contours[:i])[::3]
+            pts_island = contours[i][::3]
 
-    # החלקה מורפולוגית עדינה לאיחוי סופי של הגשרים שציירנו
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
-    closed_canvas = cv2.morphologyEx(canvas, cv2.MORPH_CLOSE, kernel)
-    closed_canvas = cv2.GaussianBlur(closed_canvas, (5, 5), 0)
-    _, closed_canvas = cv2.threshold(closed_canvas, 127, 255, cv2.THRESH_BINARY)
+            if len(pts_main) == 0 or len(pts_island) == 0:
+                continue
 
-    contours, _ = cv2.findContours(closed_canvas, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
+            best_p1, best_p2 = None, None
+            min_d = float('inf')
+
+            # מציאת המרחק המינימלי בין האי המרכזי לאי הנוכחי
+            for p_island in pts_island:
+                pi = p_island[0]
+                diff = pts_main[:, 0, :] - pi
+                dists = np.sum(diff ** 2, axis=1)
+                idx = np.argmin(dists)
+                if dists[idx] < min_d:
+                    min_d = dists[idx]
+                    best_p1 = pts_main[idx, 0, :]
+                    best_p2 = pi
+
+            # נמתח גשר רק אם המרחק הוא במסגרת הרדיוס המותר
+            gap_px = max_gap_mm * ppm
+            if min_d < (gap_px ** 2) and best_p1 is not None:
+                # ציור הגשר שמאחה את הקרע
+                cv2.line(canvas, tuple(best_p1), tuple(best_p2), 255, thickness=12)
+
+    # 3. החלקה מורפולוגית כדי שהגשרים ייראו טבעיים ולא כמו תפרים גסים
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    canvas = cv2.morphologyEx(canvas, cv2.MORPH_CLOSE, kernel)
+    canvas = cv2.GaussianBlur(canvas, (7, 7), 0)
+    _, canvas = cv2.threshold(canvas, 127, 255, cv2.THRESH_BINARY)
+
+    # 4. חילוץ ושמירת הצורה המאוחדת בחזרה ל-DXF
+    contours, _ = cv2.findContours(canvas, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
 
     new_doc = ezdxf.new(setup=True)
     new_doc.units = ezdxf.units.MM
