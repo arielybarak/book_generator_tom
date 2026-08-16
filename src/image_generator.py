@@ -180,14 +180,15 @@ def images_to_dxf(image_location, text_location, braille_location):
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    # ביטלנו את העיבוי! ה-PNG מושלם, אסור לגעת בו או להרוס אותו.
-    # imf.thicken_png_lines(image_location, thickness=6)
+    print("Converting PNGs to DXF...")
 
-    # יצירת ה-DXF של הציור
+    # יצירת ה-DXF של הציור באמצעות הפונקציה החדשה והחזקה
     imf.image_to_dxf_solid(image_location, dxf_image)
 
-    # המרת טקסט וברייל ל-DXF
+    # המרת טקסט וברייל ל-DXF (עם דיוק מקסימלי לאותיות)
     imf.png_to_dxf(text_location, dxf_text)
     imf.png_to_dxf(braille_location, dxf_braille)
+
+    print("DXF conversion completed successfully!")
 
     return dxf_image, dxf_text, dxf_braille
