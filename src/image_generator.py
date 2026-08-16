@@ -100,6 +100,8 @@ def create_images(
     braille = lf.convert_to_braille(hebrew_with_nikud)
 
     # ── עיבוד התמונה: סף דק, סגירת רווחים וצינטור ─────────────────────────
+    # עיבוד התמונה ב-PNG: סף, איחוי חורים עדין וצינטור
+    # ── עיבוד התמונה: סף דק, סגירת רווחים וצינטור ─────────────────────────
     img_np = np.array(image)
     gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
 
@@ -148,7 +150,6 @@ def create_images(
 
     # שמירת תמונת ה-PNG
     cv2.imwrite(str(image_output_location), centered)
-
 
     # שמירת טקסט בעברית PNG
     plt.figure(figsize=(5, 5))
