@@ -505,3 +505,23 @@ def plot_dxf(dxf_path):
         plt.show()
     except Exception as e:
         print(f"Could not plot DXF: {e}")
+
+def thicken_png_lines(image_path, thickness=6):
+    """
+    קורא את תמונת ה-PNG, מעבה את הקווים השחורים, ושומר חזרה.
+    זה שומר על הפרטים הפנימיים (כמו עיניים) אבל מונע שבירה של קווים דקים ב-DXF.
+    """
+    img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        return
+
+    # הופכים את התמונה (כדי שהקווים יהיו לבנים והרקע שחור - כך הניפוח עובד)
+    inverted = cv2.bitwise_not(img)
+
+    # מעבים את הקווים (Dilation)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (thickness, thickness))
+    thickened = cv2.dilate(inverted, kernel, iterations=1)
+
+    # הופכים חזרה לשחור על לבן ושומרים
+    final_img = cv2.bitwise_not(thickened)
+    cv2.imwrite(str(image_path), final_img)
