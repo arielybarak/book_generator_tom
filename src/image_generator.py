@@ -181,13 +181,13 @@ def images_to_dxf(image_location, text_location, braille_location):
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    # 1. מעבים את ה-PNG קודם, כדי שהקירות יהיו עבים ויציבים להדפסה
-    imf.thicken_png_lines(image_location, thickness=8)
+    # 1. מעבים את התמונה ככה שהקירות יהיו בשרניים ואטומים
+    imf.thicken_png_lines(image_location, thickness=10)
 
-    # 2. שימוש בפונקציה *החדשה* שלנו - היא תעתיק את ה-PNG בדיוק כפי שהוא ל-DXF
+    # 2. שימוש בפונקציה הישירה והבטוחה
     imf.image_to_dxf_solid(image_location, dxf_image)
 
-    # 3. המרת טקסט וברייל ל-DXF
+    # 3. טקסט וברייל
     imf.png_to_dxf(text_location, dxf_text)
     imf.png_to_dxf(braille_location, dxf_braille)
 

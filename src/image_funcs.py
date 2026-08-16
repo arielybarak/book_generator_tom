@@ -520,67 +520,52 @@ def thicken_png_lines(image_path, thickness=6):
     final_img = cv2.bitwise_not(thickened)
     cv2.imwrite(str(image_path), final_img)
 
-    def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150, simplify_epsilon=1.0, min_area=50):
-        """
-        קורא תמונת PNG וממיר אותה ל-DXF של צורות סגורות ומלאות (Solid).
-        מעולה להדפסות תלת-ממד כי הפונקציה ממפה את *עובי* הקו כצורה סגורה,
-        מה שמבטיח העתק מדויק של ה-PNG ללא חורים או קטיעות.
-        """
+def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
+    """
+    ממיר PNG ל-DXF של צורות אטומות.
+    מעתיק את הקווים אחד-לאחד ללא עיוותים כדי שהתלת-ממד יקרא אותם בצורה חלקה.
+    """
 
-        # 1. קריאת תמונת ה-PNG
-        img = cv2.imread(str(png_path), cv2.IMREAD_GRAYSCALE)
-        if img is None:
-            print(f"Error: Could not load {png_path}")
-            return
+    canvas_mm = canvas_cm * 10.0
 
-        # 2. הפיכה לבינארי - אנחנו רוצים שהציור השחור יהפוך ללבן (255)
-        # על רקע שחור (0) כדי שהתוכנה תזהה אותו כ"חומר"
-        _, binary = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY_INV)
+    img = cv2.imread(str(png_path), cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        print(f"Error loading {png_path}")
+        return
 
-        # החלקה עדינה כדי לוודא שאין פיקסלים חסרים שייצרו קטיעה פנימית
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    # הופך את הציור השחור ללבן ואת הרקע לשחור
+    _, bw = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY_INV)
 
-        # 3. מציאת כל קווי המתאר (RETR_TREE מוצא גם גבולות חיצוניים וגם חורים פנימיים כמו עיניים)
-        contours, _ = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_KCOS)
+    # שימוש ב-RETR_LIST כדי לתפוס את שני צידי הקו (גם קו חיצוני וגם חורים פנימיים)
+    # CHAIN_APPROX_SIMPLE שומר על הצורה המדויקת בלי לחתוך פינות
+    contours, _ = cv2.findContours(bw, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
-        if not contours:
-            print(f"Warning: No contours found in {png_path}")
-            return
+    if not contours:
+        return
 
-        # 4. חישוב המרה מפיקסלים למילימטרים (לפי גודל קנבס של 150 ס"מ)
-        canvas_mm = canvas_cm * 10.0
-        all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
-        min_x, min_y = all_pts.min(axis=0)
-        max_x, max_y = all_pts.max(axis=0)
+    all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
+    min_x, min_y = all_pts.min(axis=0)
+    max_x, max_y = all_pts.max(axis=0)
 
-        w_px = max_x - min_x + 1
-        h_px = max_y - min_y + 1
+    w_px = max_x - min_x + 1
+    h_px = max_y - min_y + 1
 
-        scale = canvas_mm / max(w_px, h_px)
-        offset_x = (canvas_mm - w_px * scale) / 2
-        offset_y = (canvas_mm - h_px * scale) / 2
+    scale = canvas_mm / max(w_px, h_px)
+    offset_x = (canvas_mm - w_px * scale) / 2
+    offset_y = (canvas_mm - h_px * scale) / 2
 
-        def px_to_mm(p):
-            return (
-                (p[0] - min_x) * scale + offset_x,
-                (max_y - p[1]) * scale + offset_y,  # הופכים את ציר ה-Y כדי שהתמונה לא תצא הפוכה
-            )
+    def px_to_mm(p):
+        return (float((p[0] - min_x) * scale + offset_x),
+                float((max_y - p[1]) * scale + offset_y))
 
-        # 5. יצירת ושמירת ה-DXF
-        doc = ezdxf.new(setup=True)
-        doc.units = ezdxf.units.MM
-        msp = doc.modelspace()
+    doc = ezdxf.new(setup=True)
+    doc.units = ezdxf.units.MM
+    msp = doc.modelspace()
 
-        for c in contours:
-            if cv2.contourArea(c) < min_area:  # סינון רעשים זעירים
-                continue
+    for c in contours:
+        # פשוט מעבירים את הנקודות המקוריות בלי לנסות "לתקן" אותן
+        pts = [px_to_mm(p[0]) for p in c]
+        if len(pts) > 2:
+            msp.add_lwpolyline(pts, close=True)
 
-            # פישוט קל כדי שהקווים יהיו חלקים ולא יכבידו על תוכנת התלת-ממד
-            approx = cv2.approxPolyDP(c, epsilon=simplify_epsilon, closed=True)
-            pts = [px_to_mm(p[0]) for p in approx]
-
-            if len(pts) > 2:
-                msp.add_lwpolyline(pts, close=True, dxfattribs={"color": 7})
-
-        doc.saveas(str(dxf_path))
+    doc.saveas(str(dxf_path))
