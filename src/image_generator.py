@@ -162,7 +162,7 @@ def create_images(
     plt.text(0.5, 0.1, display_text, fontsize=dynamic_fontsize, color='black',
              ha='center', va='center', fontweight='light', fontname='DejaVu Sans')
     plt.axis("off")
-    plt.savefig(text_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
+    plt.savefig(text_output_location, dpi=250, bbox_inches="tight", pad_inches=0)
     plt.close()
 
     # שמירת ברייל PNG
@@ -182,7 +182,7 @@ def images_to_dxf(image_location, text_location, braille_location):
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
     # 1. עיבוי הקווים בתמונה המקורית כדי לשמור על פרטים בלי שיישברו בתלת-ממד
-    imf.thicken_png_lines(image_location, thickness=6)
+    imf.thicken_png_lines(image_location, thickness=8)
 
     # 2. יצירת ה-DXF המקורי של התמונה (עם פישוט 0.8 למניעת "מדרגות" בשוליים)
     imf.image_to_dxf_exact(image_location, dxf_image, simplify_epsilon=0.8)

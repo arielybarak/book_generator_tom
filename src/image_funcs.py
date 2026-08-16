@@ -196,7 +196,7 @@ def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0, 
     if bridge_gaps:
         # 1. סגירה אגרסיבית (Closing) לחיבור נתקים גדולים
         # מכיוון שהגדלנו פי 4, קרנל של 25x25 יסגור רווחים של כ-6 פיקסלים בתמונה המקורית
-        close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25))
+        close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (35, 35))
         bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, close_kernel, iterations=1)
 
         # 2. הרחבה (Dilation) ולאחריה כיווץ (Erosion)
@@ -516,7 +516,6 @@ def thicken_png_lines(image_path, thickness=6):
     קורא את תמונת ה-PNG, מעבה את הקווים השחורים, ושומר חזרה.
     זה שומר על הפרטים הפנימיים (כמו עיניים) אבל מונע שבירה של קווים דקים ב-DXF.
     """
-    import cv2
     img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
     if img is None:
         return
