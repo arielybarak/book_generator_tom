@@ -523,27 +523,19 @@ def thicken_png_lines(image_path, thickness=6):
 
 
 def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
-    """
-    גרסה סופית ונקייה:
-    מעתיקה את ה-PNG אחד-לאחד ללא קיטועים, שומרת על נאמנות מקסימלית למקור,
-    ומסננת אוטומטית את המסגרת של התמונה.
-    """
     import cv2
     import numpy as np
     import ezdxf
 
     canvas_mm = canvas_cm * 10.0
 
-    # 1. קריאת ה-PNG המושלם שלך
     img = cv2.imread(str(png_path), cv2.IMREAD_GRAYSCALE)
     if img is None:
         print(f"Error loading {png_path}")
         return
 
-    # 2. הפיכה לשחור-לבן מוחלט (קווים לבנים, רקע שחור)
     _, bw = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY_INV)
 
-    # 3. מציאת קווי המתאר (RETR_TREE שומר גם על חורים פנימיים כדי שזה לא יהיה סתם גוש)
     contours, _ = cv2.findContours(bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return
@@ -551,15 +543,14 @@ def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
     h_img, w_img = bw.shape
     valid_contours = []
 
-    # 4. סינון מסגרת ורעש
     for c in contours:
         x, y, w, h = cv2.boundingRect(c)
 
-        # אם זה תופס כמעט את כל התמונה - זו המסגרת החיצונית, נדלג עליה!
-        if w > w_img * 0.95 and h > h_img * 0.95:
+        # התיקון הקריטי: בודק שזו מסגרת *רק* אם היא נוגעת ממש בקצוות התמונה (x ו-y קטנים מ-5)
+        # זה מונע מחיקה של הציור עצמו אם הוא חתוך בדיוק לגבולות ה-PNG.
+        if w > w_img * 0.95 and h > h_img * 0.95 and x < 5 and y < 5:
             continue
 
-        # אם זה לכלוך של פחות מ-10 פיקסלים - נדלג עליו
         if cv2.contourArea(c) < 10:
             continue
 
@@ -569,7 +560,6 @@ def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
         print("No valid drawing found after filtering.")
         return
 
-    # 5. חישוב גבולות הציור האמיתי (בלי המסגרת) כדי למרכז אותו נכון על הלוח
     all_pts = np.vstack([c.reshape(-1, 2) for c in valid_contours])
     min_x, min_y = all_pts.min(axis=0)
     max_x, max_y = all_pts.max(axis=0)
@@ -585,9 +575,7 @@ def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
 
-    # 6. יצירת ה-DXF
     for c in valid_contours:
-        # epsilon=0.5 שומר על צורה זהה כמעט ב-100% ל-PNG
         approx = cv2.approxPolyDP(c, epsilon=0.5, closed=True)
 
         pts = []
