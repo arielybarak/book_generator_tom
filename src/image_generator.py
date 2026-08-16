@@ -100,33 +100,43 @@ def create_images(
     braille = lf.convert_to_braille(hebrew_with_nikud)
 
     # ── עיבוד התמונה: סף דק, סגירת רווחים וצינטור ─────────────────────────
-    # עיבוד התמונה ב-PNG: סף, איחוי חורים עדין וצינטור
     img_np = np.array(image)
     gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
 
-    _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+    # 1. טשטוש עדין כדי לגרום לפיקסלים קרובים "לזלוג" אחד לשני
+    blurred = cv2.GaussianBlur(gray, (7, 7), 0)
 
-    # 1. איחוי וסגירת מרווחים בקו לפני סינון הרעשים!
+    # 2. הפיכה לשחור ולבן (מה ששחור במקור יהפוך ללבן כדי שנוכל לעבד אותו)
+    _, binary = cv2.threshold(blurred, 150, 255, cv2.THRESH_BINARY_INV)
+
+    # 3. גישור על קטיעות: הרחבה (Dilation) חזקה שמחברת בין מקטעי קו מנותקים
+    # קרנל גדול (15x15) מבטיח שחורים בגודל של עד 15 פיקסלים ייסגרו לגמרי
+    kernel_bridge = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    connected = cv2.dilate(binary, kernel_bridge, iterations=1)
+
+    # 4. החלקת הקו וסגירת חורים פנימיים שנוצרו (Closing)
     kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_close, iterations=2)
+    connected = cv2.morphologyEx(connected, cv2.MORPH_CLOSE, kernel_close, iterations=2)
 
-    # 2. הרחבה לעובי קו הדפסה
-    kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    binary = cv2.dilate(binary, kernel_dilate, iterations=1)
+    # 5. כיווץ בחזרה (Erosion) כדי להחזיר את הקו לעובי נורמלי
+    # השתמשנו בקרנל קצת יותר קטן (11x11) כדי להשאיר קו בשרני שמצטלם/מודפס טוב
+    kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    thinned = cv2.erode(connected, kernel_erode, iterations=1)
 
-    # 3. ניקוי רעשים עדין ביותר (שמירה על רכיבים מעל 30 פיקסלים בלבד במקום 200)
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-    clean = np.zeros_like(binary)
+    # 6. ניקוי רעשים (שמירה על צורות גדולות בלבד)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(thinned, connectivity=8)
+    clean = np.zeros_like(thinned)
     for i in range(1, num_labels):
-        if stats[i, cv2.CC_STAT_AREA] >= 30:
+        # העלינו ל-50 פיקסלים כי ההרחבה מגדילה גם את הרעשים הקטנים
+        if stats[i, cv2.CC_STAT_AREA] >= 50:
             clean[labels == i] = 255
 
     edges = cv2.bitwise_not(clean)
     h, w = edges.shape
     edges[h - 1:h, w - 1:w] = 255
 
-    # צינטור התמונה
-    ys, xs = np.where(edges[1:h-1, 1:w-1] == 0)
+    # צינטור התמונה (נשאר ללא שינוי)
+    ys, xs = np.where(edges[1:h - 1, 1:w - 1] == 0)
     if len(xs) > 0:
         shift_x = int(w / 2 - xs.mean())
         shift_y = int(h / 2 - ys.mean())
@@ -138,6 +148,7 @@ def create_images(
 
     # שמירת תמונת ה-PNG
     cv2.imwrite(str(image_output_location), centered)
+
 
     # שמירת טקסט בעברית PNG
     plt.figure(figsize=(5, 5))
