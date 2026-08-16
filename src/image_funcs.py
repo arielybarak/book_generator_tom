@@ -55,15 +55,15 @@ def convert_tensor_to_pil_img(tensor):
 
 # ── Image → DXF ────────────────────────────────────────────────────────────────
 
-def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0):
+def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0, bridge_gaps=True):
     """
     Convert a grayscale/binary image OR image path to a smoother DXF polyline file.
     Good for tactile / 3D-printable image outlines.
 
     Main fixes:
     - accepts path or numpy array
+    - aggressive gap bridging for fragmented/dashed lines (bridge_gaps=True)
     - smooths the binary mask before contour extraction
-    - avoids keeping every pixel stair-step
     - exports closed continuous contours
     """
     canvas_mm = canvas_cm * 10.0
@@ -102,10 +102,30 @@ def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0):
     bin_img = cv2.GaussianBlur(bin_img, (5, 5), 0)
     _, bin_img = cv2.threshold(bin_img, 127, 255, cv2.THRESH_BINARY)
 
-    # Close tiny gaps and smooth corners
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, kernel, iterations=1)
-    bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, kernel, iterations=1)
+    # ── מנגנון התיקון והשלמת הקווים המקוטעים ──
+    if bridge_gaps:
+        # 1. סגירה אגרסיבית (Closing) לחיבור נתקים גדולים
+        # מכיוון שהגדלנו פי 4, קרנל של 25x25 יסגור רווחים של כ-6 פיקסלים בתמונה המקורית
+        close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25))
+        bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, close_kernel, iterations=1)
+
+        # 2. הרחבה (Dilation) ולאחריה כיווץ (Erosion)
+        # מותח את הקווים אחד לכיוון השני כדי להבטיח מגע, ואז מכווץ חזרה לשמירה על עובי הקו
+        dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+        erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+
+        bin_img = cv2.dilate(bin_img, dilate_kernel, iterations=1)
+        bin_img = cv2.erode(bin_img, erode_kernel, iterations=1)
+
+        # 3. ניקוי רעשים (Opening) - מחיקת "איים" קטנים ולכלוכים
+        open_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, open_kernel, iterations=1)
+
+    else:
+        # ההתנהגות הישנה (גישור חלש)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, kernel, iterations=1)
+        bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, kernel, iterations=1)
 
     # Use TC89 instead of CHAIN_APPROX_NONE to avoid exporting every pixel step
     contours, _ = cv2.findContours(
