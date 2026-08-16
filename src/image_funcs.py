@@ -520,11 +520,15 @@ def thicken_png_lines(image_path, thickness=6):
     final_img = cv2.bitwise_not(thickened)
     cv2.imwrite(str(image_path), final_img)
 
+
 def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
     """
     ממיר PNG ל-DXF של צורות אטומות.
-    מעתיק את הקווים אחד-לאחד ללא עיוותים כדי שהתלת-ממד יקרא אותם בצורה חלקה.
+    כולל מנגנון פישוט חכם שמונע מתוכנת התלת-ממד לקרוס ולהעלים את הציור.
     """
+    import cv2
+    import numpy as np
+    import ezdxf
 
     canvas_mm = canvas_cm * 10.0
 
@@ -533,17 +537,21 @@ def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
         print(f"Error loading {png_path}")
         return
 
-    # הופך את הציור השחור ללבן ואת הרקע לשחור
-    _, bw = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY_INV)
+    # הופך את הציור השחור ללבן ואת הרקע לשחור (כדי שהתוכנה תזהה את החומר)
+    _, bw = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY_INV)
 
-    # שימוש ב-RETR_LIST כדי לתפוס את שני צידי הקו (גם קו חיצוני וגם חורים פנימיים)
-    # CHAIN_APPROX_SIMPLE שומר על הצורה המדויקת בלי לחתוך פינות
-    contours, _ = cv2.findContours(bw, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    # שימוש ב-RETR_TREE כדי לשמור על החורים (כמו בתוך עיניים או אותיות)
+    contours, _ = cv2.findContours(bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
     if not contours:
         return
 
-    all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
+    # סינון לכלוכים זעירים ברקע שיכולים לשבש את ההדפסה
+    valid_contours = [c for c in contours if cv2.contourArea(c) > 30]
+    if not valid_contours:
+        return
+
+    all_pts = np.vstack([c.reshape(-1, 2) for c in valid_contours])
     min_x, min_y = all_pts.min(axis=0)
     max_x, max_y = all_pts.max(axis=0)
 
@@ -562,9 +570,12 @@ def image_to_dxf_solid(png_path, dxf_path, canvas_cm=150):
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
 
-    for c in contours:
-        # פשוט מעבירים את הנקודות המקוריות בלי לנסות "לתקן" אותן
-        pts = [px_to_mm(p[0]) for p in c]
+    for c in valid_contours:
+        # כאן טמון הקסם: approxPolyDP מפחיתה דרמטית את כמות הנקודות
+        # (epsilon=1.5 הוא איזון מושלם שלא מעוות את הציור אבל מרגיע את התלת-ממד)
+        approx = cv2.approxPolyDP(c, epsilon=1.5, closed=True)
+
+        pts = [px_to_mm(p[0]) for p in approx]
         if len(pts) > 2:
             msp.add_lwpolyline(pts, close=True)
 
