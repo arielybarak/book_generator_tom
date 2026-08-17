@@ -132,7 +132,7 @@ def create_images(
     centered_input = cv2.bitwise_not(clean)
 
     # הוספת שוליים לבנים מסביב לתמונה לפני מרכוז למניעת חיתוך בקצוות למעלה/למטה
-    pad = 80
+    pad = 40
     centered_input = cv2.copyMakeBorder(
         centered_input, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255
     )
