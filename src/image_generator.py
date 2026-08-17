@@ -199,7 +199,7 @@ def images_to_dxf(image_location, text_location, braille_location):
         canvas_cm=150,
         thickness_boost=6,
         smoothing=0.5,
-        margin_ratio=0.15
+        margin_ratio=0.28
     )
 
     imf.png_to_dxf(text_location, dxf_text)
