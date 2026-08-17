@@ -469,43 +469,50 @@ def thicken_png_lines(image_path, thickness=6):
     cv2.imwrite(str(image_path), final_img)
 
 
-def create_smooth_dxf_from_png(
-    image_path,
-    out_path,
-    canvas_cm=150,
-    thickness_boost=3,
-    smoothing=0.3,
-    top_margin_ratio=0.25,
-    bottom_margin_ratio=0.25
-):
+def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_boost=3, smoothing=0.3, margin_ratio=0.35):
+    """
+    ממיר תמונת PNG ל-DXF בצורה חלקה ומדויקת להדפסת תלת מימד.
+    מוודא שאין חורים ושהקווים הם "קירות" סגורים עם עובי.
+    כולל מרווח ביטחון (margin_ratio) למניעת מגע או חיתוך בקצוות ובטקסט.
+    """
     canvas_mm = canvas_cm * 10.0
 
+    # 1. טעינת התמונה
     img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise RuntimeError(f"Could not load image: {image_path}")
 
+    # הוספת שוליים לבנים מסביב לתמונה כדי למנוע חיתוך בקצוות הפיזיים
     pad = 30
     img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
 
+    # המרה לשחור-לבן מוחלט
     if np.mean(img) > 127:
         img = cv2.bitwise_not(img)
     _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
 
+    # 2. סגירת חורים קריטית (Closing)
     bridge_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, bridge_kernel, iterations=1)
 
+    # איחוי ועיבוי הקו למניעת נתקים ושבירות
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (thickness_boost, thickness_boost))
     bin_img = cv2.dilate(bin_img, kernel, iterations=1)
 
+    # החלקה קלה
     bin_img = cv2.GaussianBlur(bin_img, (5, 5), 0)
     _, bin_img = cv2.threshold(bin_img, 127, 255, cv2.THRESH_BINARY)
 
+    # 3. מציאת קווי המתאר
     contours, _ = cv2.findContours(bin_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_KCOS)
+
+    # סינון רעשים
     contours = [c for c in contours if cv2.contourArea(c) >= 50]
     if not contours:
         print(f"Warning: no significant contours for {out_path}")
         return
 
+    # 4. חישוב קנה מידה ומרכוז עם מרווח ביטחון למעלה ולמטה
     all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
     min_x, min_y = all_pts.min(axis=0)
     max_x, max_y = all_pts.max(axis=0)
@@ -513,15 +520,12 @@ def create_smooth_dxf_from_png(
     w_px = max_x - min_x + 1
     h_px = max_y - min_y + 1
 
-    # Calculate usable height considering separate top/bottom margins
-    usable_height_mm = canvas_mm * (1.0 - top_margin_ratio - bottom_margin_ratio)
-    usable_width_mm = canvas_mm * 0.8  # 10% side margins
+    # שטח מוקטן במרכז (למשל 70% מנפח המשטח) כדי להשאיר שוליים מרווחים מהטקסט העברי/ברייל
+    usable_canvas_mm = canvas_mm * (1.0 - 2 * margin_ratio)
+    scale = usable_canvas_mm / max(w_px, h_px)
 
-    scale = min(usable_width_mm / w_px, usable_height_mm / h_px)
-
-    # Center horizontally, place vertically inside the safe window between top & bottom margins
     offset_x = (canvas_mm - w_px * scale) / 2
-    offset_y = (canvas_mm * bottom_margin_ratio) + (usable_height_mm - h_px * scale) / 2
+    offset_y = (canvas_mm - h_px * scale) / 2
 
     def px_to_mm(p):
         return (
@@ -529,6 +533,7 @@ def create_smooth_dxf_from_png(
             (max_y - p[1]) * scale + offset_y,
         )
 
+    # 5. יצירת קובץ ה-DXF
     doc = ezdxf.new(setup=True)
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
@@ -540,83 +545,6 @@ def create_smooth_dxf_from_png(
             msp.add_lwpolyline(pts, close=True, dxfattribs={"color": 7})
 
     doc.saveas(out_path)
-#
-# def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_boost=3, smoothing=0.3, margin_ratio=0.15):
-#     """
-#     ממיר תמונת PNG ל-DXF בצורה חלקה ומדויקת להדפסת תלת מימד.
-#     מוודא שאין חורים ושהקווים הם "קירות" סגורים עם עובי.
-#     כולל מרווח ביטחון (margin_ratio) למניעת מגע או חיתוך בקצוות ובטקסט.
-#     """
-#     canvas_mm = canvas_cm * 10.0
-#
-#     # 1. טעינת התמונה
-#     img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
-#     if img is None:
-#         raise RuntimeError(f"Could not load image: {image_path}")
-#
-#     # הוספת שוליים לבנים מסביב לתמונה כדי למנוע חיתוך בקצוות הפיזיים
-#     pad = 30
-#     img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
-#
-#     # המרה לשחור-לבן מוחלט
-#     if np.mean(img) > 127:
-#         img = cv2.bitwise_not(img)
-#     _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
-#
-#     # 2. סגירת חורים קריטית (Closing)
-#     bridge_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
-#     bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, bridge_kernel, iterations=1)
-#
-#     # איחוי ועיבוי הקו למניעת נתקים ושבירות
-#     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (thickness_boost, thickness_boost))
-#     bin_img = cv2.dilate(bin_img, kernel, iterations=1)
-#
-#     # החלקה קלה
-#     bin_img = cv2.GaussianBlur(bin_img, (5, 5), 0)
-#     _, bin_img = cv2.threshold(bin_img, 127, 255, cv2.THRESH_BINARY)
-#
-#     # 3. מציאת קווי המתאר
-#     contours, _ = cv2.findContours(bin_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_KCOS)
-#
-#     # סינון רעשים
-#     contours = [c for c in contours if cv2.contourArea(c) >= 50]
-#     if not contours:
-#         print(f"Warning: no significant contours for {out_path}")
-#         return
-#
-#     # 4. חישוב קנה מידה ומרכוז עם מרווח ביטחון למעלה ולמטה
-#     all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
-#     min_x, min_y = all_pts.min(axis=0)
-#     max_x, max_y = all_pts.max(axis=0)
-#
-#     w_px = max_x - min_x + 1
-#     h_px = max_y - min_y + 1
-#
-#     # שטח מוקטן במרכז (למשל 70% מנפח המשטח) כדי להשאיר שוליים מרווחים מהטקסט העברי/ברייל
-#     usable_canvas_mm = canvas_mm * (1.0 - 2 * margin_ratio)
-#     scale = usable_canvas_mm / max(w_px, h_px)
-#
-#     offset_x = (canvas_mm - w_px * scale) / 2
-#     offset_y = (canvas_mm - h_px * scale) / 2
-#
-#     def px_to_mm(p):
-#         return (
-#             (p[0] - min_x) * scale + offset_x,
-#             (max_y - p[1]) * scale + offset_y,
-#         )
-#
-#     # 5. יצירת קובץ ה-DXF
-#     doc = ezdxf.new(setup=True)
-#     doc.units = ezdxf.units.MM
-#     msp = doc.modelspace()
-#
-#     for c in contours:
-#         approx = cv2.approxPolyDP(c, epsilon=smoothing, closed=True)
-#         pts = [px_to_mm(p[0]) for p in approx]
-#         if len(pts) > 2:
-#             msp.add_lwpolyline(pts, close=True, dxfattribs={"color": 7})
-#
-#     doc.saveas(out_path)
 
 
 def create_pencil_dxf_from_png(image_path, out_path, canvas_cm=150, gap_size=15, simplify=1.5):

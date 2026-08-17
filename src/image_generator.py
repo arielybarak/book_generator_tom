@@ -132,7 +132,7 @@ def create_images(
     centered_input = cv2.bitwise_not(clean)
 
     # הוספת שוליים לבנים מסביב לתמונה לפני מרכוז למניעת חיתוך בקצוות למעלה/למטה
-    pad = 25
+    pad = 80
     centered_input = cv2.copyMakeBorder(
         centered_input, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255
     )
@@ -199,7 +199,7 @@ def images_to_dxf(image_location, text_location, braille_location):
         canvas_cm=150,
         thickness_boost=6,
         smoothing=0.5,
-        margin_ratio=0.28
+        margin_ratio=0.35
     )
 
     imf.png_to_dxf(text_location, dxf_text)
