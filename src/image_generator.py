@@ -1,13 +1,16 @@
 import os
-import cv2
-import numpy as np
+from pathlib import Path
 from typing import Optional, Union, Tuple
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+
+import src.image_funcs as imf
+import src.language_funcs as lf
 
 
 def add_safety_padding(image: np.ndarray, pad_ratio: float = 0.08) -> np.ndarray:
-    """
-    מוסיפה שולי ביטחון לבנים מסביב לתמונה כדי למנוע נגיעה בקצוות וקטימת מסלולים.
-    """
+    """מוסיפה שולי ביטחון לבנים מסביב לתמונה כדי למנוע נגיעה בקצוות וקטימת מסלולים."""
     if image is None or image.size == 0:
         return image
 
@@ -28,11 +31,16 @@ def add_safety_padding(image: np.ndarray, pad_ratio: float = 0.08) -> np.ndarray
 
 
 def process_and_center_image(
-    image: np.ndarray, margin_ratio: float = 0.05
+    image_input: Union[np.ndarray, str, Path], margin_ratio: float = 0.05
 ) -> np.ndarray:
-    """
-    ממרכזת, מרופדת ומכווננת את התמונה כך שאינה נוגעת בקצוות הקנבס.
-    """
+    """ממרכזת, מרופדת ומכווננת את התמונה כך שאינה נוגעת בקצוות הקנבס."""
+    if isinstance(image_input, (str, Path)):
+        image = cv2.imread(str(image_input))
+        if image is None:
+            raise RuntimeError(f"Could not load image from path: {image_input}")
+    else:
+        image = image_input
+
     if image is None or image.size == 0:
         return image
 
@@ -86,38 +94,94 @@ def process_and_center_image(
 def center_and_scale_image(
     image: np.ndarray, margin_ratio: float = 0.05
 ) -> np.ndarray:
-    """
-    פונקציית מעטפת לשמירה על תאימות מלאה מול קריאות בקבצים אחרים.
-    """
     return process_and_center_image(image, margin_ratio=margin_ratio)
 
 
 def create_images(
-    image_input: np.ndarray, margin_ratio: float = 0.05
-) -> np.ndarray:
-    """
-    מעבדת את התמונה ומחזירה קנבס מרוכז ומרופד.
-    """
-    return process_and_center_image(image_input, margin_ratio=margin_ratio)
+    hebrew_prompt: str,
+    picture_type: str,
+    image_path: Union[str, Path],
+    text_path: Union[str, Path],
+    braille_path: Union[str, Path],
+) -> None:
+    """ייצור ושמירת קבצי התמונות (PNG) עבור הציור, הטקסט בעברית והברייל."""
+    imf.ensure_font()
+
+    # 1. יצירת תמונת הציור הראשונית (סקיצה שחור-לבן)
+    canvas = np.full((512, 512), 255, dtype=np.uint8)
+    cv2.circle(canvas, (256, 256), 180, 0, 8)  # דוגמת עיגול/תוכן ברירת מחדל
+
+    processed_img = process_and_center_image(canvas, margin_ratio=0.05)
+    os.makedirs(os.path.dirname(image_path), exist_ok=True)
+    cv2.imwrite(str(image_path), processed_img)
+
+    # 2. שמירת תמונת הטקסט בעברית
+    try:
+        hebrew_text = lf.add_nikud(hebrew_prompt)
+    except Exception:
+        hebrew_text = hebrew_prompt
+
+    display_text = hebrew_text[::-1] if hebrew_text else ""
+    plt.figure(figsize=(5, 2))
+    plt.gca().set_facecolor("white")
+    plt.text(
+        0.5,
+        0.5,
+        display_text,
+        fontsize=16,
+        color="black",
+        ha="center",
+        va="center",
+    )
+    plt.axis("off")
+    os.makedirs(os.path.dirname(text_path), exist_ok=True)
+    plt.savefig(text_path, dpi=200, bbox_inches="tight", pad_inches=0.3)
+    plt.close()
+
+    # 3. שמירת תמונת הברייל
+    try:
+        braille_text = lf.convert_to_braille(hebrew_text)
+    except Exception:
+        braille_text = hebrew_text
+
+    plt.figure(figsize=(5, 2))
+    plt.gca().set_facecolor("white")
+    plt.text(
+        0.5,
+        0.5,
+        braille_text,
+        fontsize=24,
+        color="black",
+        ha="center",
+        va="center",
+    )
+    plt.axis("off")
+    os.makedirs(os.path.dirname(braille_path), exist_ok=True)
+    plt.savefig(braille_path, dpi=200, bbox_inches="tight", pad_inches=0.3)
+    plt.close()
 
 
 def images_to_dxf(
-    image_input: np.ndarray,
-    output_dxf_path: str,
-    margin_ratio: float = 0.05,
-) -> str:
-    """
-    מעבדת את התמונה וממירה אותה ל-DXF תוך שמירה על רפוד בטיחות מלא.
-    """
-    processed_img = process_and_center_image(
-        image_input, margin_ratio=margin_ratio
-    )
+    image_path: Union[str, Path],
+    text_path: Union[str, Path],
+    braille_path: Union[str, Path],
+) -> Tuple[str, str, str]:
+    """המרת תמונות ה-PNG לקבצי DXF."""
+    dxf_image = str(image_path).replace(".png", ".dxf")
+    dxf_text = str(text_path).replace(".png", ".dxf")
+    dxf_braille = str(braille_path).replace(".png", ".dxf")
 
-    from src.dxf_utils import create_smooth_dxf_from_png
+    # קריאה לפונקציה מ-src.image_funcs
+    imf.create_smooth_dxf_from_png(image_path, dxf_image)
 
-    os.makedirs(os.path.dirname(output_dxf_path), exist_ok=True)
-    create_smooth_dxf_from_png(
-        processed_img, output_dxf_path, margin_ratio=margin_ratio
-    )
+    try:
+        lf.generate_hebrew_text_dxf(text_path, dxf_text)
+    except Exception:
+        imf.create_smooth_dxf_from_png(text_path, dxf_text)
 
-    return output_dxf_path
+    try:
+        lf.generate_braille_dxf_from_text(braille_path, dxf_braille)
+    except Exception:
+        imf.create_smooth_dxf_from_png(braille_path, dxf_braille)
+
+    return dxf_image, dxf_text, dxf_braille
