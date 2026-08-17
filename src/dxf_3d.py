@@ -213,59 +213,87 @@ def _fit_transform(paths, circles, x0, y0, x1, y1):
     s = min((x1 - x0) / w, (y1 - y0) / h)
     return (s, (bx0 + bx1) / 2.0, (by0 + by1) / 2.0, (x0 + x1) / 2.0, (y0 + y1) / 2.0)
 
+#
+# def layout_content_on_base(
+#     text_shapes: List[List[Point]],
+#     braille_circles: List[CircleDef],
+#     image_closed_paths: List[List[Point]],
+#     image_open_paths: List[List[Point]],
+# ) -> Tuple[List[List[Point]], List[CircleDef], List[List[Point]], List[List[Point]]]:
+#     """
+#     Lay the three tactile layers out in horizontal bands so they don't overlap:
+#         ┌─────────────── Hebrew text  (top strip) ───────────────┐
+#         │                    line-art image  (middle)            │
+#         └─────────────── Braille dots  (bottom strip) ───────────┘
+#     Each band is filled independently — the DXF layers arrive at mismatched, oversized
+#     coordinate systems (image/text ~1500mm, braille ~px), so each is scaled to fit its
+#     own band. Image closed+open paths share ONE transform to stay registered.
+#     """
+#     m = CONTENT_MARGIN_MM
+#     x0, x1 = m, BASE_WIDTH - m
+#     usable_h = BASE_HEIGHT - 2 * m
+#     text_h = TEXT_BAND_FRAC * usable_h
+#     brl_h  = BRAILLE_BAND_FRAC * usable_h
+#     g = BAND_GAP_MM
+#
+#     # y measured from the plate bottom (0) up to BASE_HEIGHT
+#     brl_y0, brl_y1 = m, m + brl_h                                   # bottom strip
+#     txt_y1, txt_y0 = BASE_HEIGHT - m, BASE_HEIGHT - m - text_h      # top strip
+#     img_y0, img_y1 = brl_y1 + g, txt_y0 - g                         # middle
+#
+#     # Hebrew text → top band
+#     t_txt = _fit_transform(text_shapes, [], x0, txt_y0, x1, txt_y1)
+#     text_out = _xform_paths(text_shapes, *t_txt) if t_txt else text_shapes
+#
+#     # Braille → bottom band at its NATIVE Grade-1 size (it is generated at fixed mm
+#     # spacing). Do NOT stretch it to fill the band — that would blow up the dot gaps for
+#     # short words. Centre it; only shrink if a long word would overflow the plate width.
+#     bx0, by0, bx1, by1 = bbox_of_paths([], braille_circles)
+#     bw, bh = bx1 - bx0, by1 - by0
+#     if bw > 0 and bh > 0:
+#         s_brl = min(1.0, (x1 - x0) / bw, (brl_y1 - brl_y0) / bh)
+#         brl_out = _xform_circles(braille_circles, s_brl, (bx0 + bx1) / 2.0, (by0 + by1) / 2.0,
+#                                  (x0 + x1) / 2.0, (brl_y0 + brl_y1) / 2.0)
+#     else:
+#         brl_out = braille_circles
+#
+#     # Image (closed + open) → middle band, one shared transform to keep it registered
+#     t_img = _fit_transform(image_closed_paths + image_open_paths, [], x0, img_y0, x1, img_y1)
+#     img_closed_out = _xform_paths(image_closed_paths, *t_img) if t_img else image_closed_paths
+#     img_open_out   = _xform_paths(image_open_paths,   *t_img) if t_img else image_open_paths
+#
+#     print(f"  Layout → text band {text_h:.0f}mm / image {img_y1 - img_y0:.0f}mm / "
+#           f"braille band {brl_h:.0f}mm  (margin {m:.0f}mm)")
+#     return text_out, brl_out, img_closed_out, img_open_out
 
-def layout_content_on_base(
-    text_shapes: List[List[Point]],
-    braille_circles: List[CircleDef],
-    image_closed_paths: List[List[Point]],
-    image_open_paths: List[List[Point]],
-) -> Tuple[List[List[Point]], List[CircleDef], List[List[Point]], List[List[Point]]]:
+def layout_content_on_base(base_width_mm: float, base_height_mm: float, config: dict) -> dict:
     """
-    Lay the three tactile layers out in horizontal bands so they don't overlap:
-        ┌─────────────── Hebrew text  (top strip) ───────────────┐
-        │                    line-art image  (middle)            │
-        └─────────────── Braille dots  (bottom strip) ───────────┘
-    Each band is filled independently — the DXF layers arrive at mismatched, oversized
-    coordinate systems (image/text ~1500mm, braille ~px), so each is scaled to fit its
-    own band. Image closed+open paths share ONE transform to stay registered.
+    מחשבת את המיקום והגודל המוקצה לכל רצועה בלוח (טקסט, תמונה, ברייל).
     """
-    m = CONTENT_MARGIN_MM
-    x0, x1 = m, BASE_WIDTH - m
-    usable_h = BASE_HEIGHT - 2 * m
-    text_h = TEXT_BAND_FRAC * usable_h
-    brl_h  = BRAILLE_BAND_FRAC * usable_h
-    g = BAND_GAP_MM
+    # קריאת הפרמטרים מ-config (עם ערכי ברירת מחדל משופרים)
+    layout_cfg = config.get('layout', {})
+    text_frac = layout_cfg.get('text_frac', 0.12)        # 12% מהגובה במקום 18%
+    braille_frac = layout_cfg.get('braille_frac', 0.12)  # 12% מהגובה במקום 18%
+    band_gap_mm = layout_cfg.get('band_gap_mm', 2.0)      # מרווח 2 מ"מ במקום 4 מ"מ
+    margin_mm = layout_cfg.get('margin_mm', 5.0)          # שוליים 5 מ"מ במקום 10 מ"מ
 
-    # y measured from the plate bottom (0) up to BASE_HEIGHT
-    brl_y0, brl_y1 = m, m + brl_h                                   # bottom strip
-    txt_y1, txt_y0 = BASE_HEIGHT - m, BASE_HEIGHT - m - text_h      # top strip
-    img_y0, img_y1 = brl_y1 + g, txt_y0 - g                         # middle
+    text_height_mm = base_height_mm * text_frac
+    braille_height_mm = base_height_mm * braille_frac
 
-    # Hebrew text → top band
-    t_txt = _fit_transform(text_shapes, [], x0, txt_y0, x1, txt_y1)
-    text_out = _xform_paths(text_shapes, *t_txt) if t_txt else text_shapes
+    # חישוב השטח שנשאר לתמונה במרכז הלוח
+    used_vertical_space = (margin_mm * 2) + text_height_mm + braille_height_mm + (band_gap_mm * 2)
+    image_height_mm = max(10.0, base_height_mm - used_vertical_space)
 
-    # Braille → bottom band at its NATIVE Grade-1 size (it is generated at fixed mm
-    # spacing). Do NOT stretch it to fill the band — that would blow up the dot gaps for
-    # short words. Centre it; only shrink if a long word would overflow the plate width.
-    bx0, by0, bx1, by1 = bbox_of_paths([], braille_circles)
-    bw, bh = bx1 - bx0, by1 - by0
-    if bw > 0 and bh > 0:
-        s_brl = min(1.0, (x1 - x0) / bw, (brl_y1 - brl_y0) / bh)
-        brl_out = _xform_circles(braille_circles, s_brl, (bx0 + bx1) / 2.0, (by0 + by1) / 2.0,
-                                 (x0 + x1) / 2.0, (brl_y0 + brl_y1) / 2.0)
-    else:
-        brl_out = braille_circles
+    # קואורדינטות אנכיות (Y)
+    text_y = base_height_mm - margin_mm - text_height_mm
+    image_y = text_y - band_gap_mm - image_height_mm
+    braille_y = margin_mm
 
-    # Image (closed + open) → middle band, one shared transform to keep it registered
-    t_img = _fit_transform(image_closed_paths + image_open_paths, [], x0, img_y0, x1, img_y1)
-    img_closed_out = _xform_paths(image_closed_paths, *t_img) if t_img else image_closed_paths
-    img_open_out   = _xform_paths(image_open_paths,   *t_img) if t_img else image_open_paths
-
-    print(f"  Layout → text band {text_h:.0f}mm / image {img_y1 - img_y0:.0f}mm / "
-          f"braille band {brl_h:.0f}mm  (margin {m:.0f}mm)")
-    return text_out, brl_out, img_closed_out, img_open_out
-
+    return {
+        'text_bbox': (margin_mm, text_y, base_width_mm - 2*margin_mm, text_height_mm),
+        'image_bbox': (margin_mm, image_y, base_width_mm - 2*margin_mm, image_height_mm),
+        'braille_bbox': (margin_mm, braille_y, base_width_mm - 2*margin_mm, braille_height_mm),
+    }
 
 def safe_fillet_top(solid: cq.Workplane, radius: float) -> cq.Workplane:
     """Fillet the top-face edges of a solid; silently skip if CadQuery rejects the radius."""

@@ -10,7 +10,8 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from diffusers import AutoPipelineForText2Image
-
+from typing import Optional
+import os
 from src import language_funcs as lf
 from src import image_funcs as imf
 from src.config import cfg
@@ -185,24 +186,107 @@ def create_images(
     plt.savefig(braille_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
     plt.close()
 
+def center_and_scale_image(
+    image: np.ndarray,
+    margin_ratio: float = 0.05,
+    border_value: int = 255
+) -> np.ndarray:
+    """
+    ממרכזת ומכווננת את גודל האיור על גבי קנבס חדש תוך שמירה מלאה על יחס גובה-רוחב
+    ומניעת חיתוך של קווי קצה.
+    """
+    if image is None or image.size == 0:
+        return image
 
-def images_to_dxf(image_location, text_location, braille_location):
-    dxf_image = str(image_location).replace('.png', '.dxf')
-    dxf_text = str(text_location).replace('.png', '.dxf')
-    dxf_braille = str(braille_location).replace('.png', '.dxf')
+    # המרה לגווני אפור לצורך זיהוי מיקומי התוכן
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image.copy()
 
-    # המרה ל-DXF סגור עם שולי ביטחון (margin_ratio=0.15)
-    # כדי שלא ייגע בטקסט בעברית ובברייל ולא ייחתך בקצוות למעלה/למטה
-    imf.create_smooth_dxf_from_png(
-        image_location,
-        dxf_image,
-        canvas_cm=150,
-        thickness_boost=8,
-        smoothing=0.5,
-        margin_ratio=0.22
+    # איתור פיקסלים של הציור (כל פיקסל שאינו רקע לבן)
+    mask = gray < 240
+    coords = cv2.findNonZero(mask.astype(np.uint8))
+
+    if coords is None:
+        return image
+
+    # מציאת תיבת החסימה (Bounding Box) של התוכן הממשי
+    x, y, w, h = cv2.boundingRect(coords)
+    cropped_content = image[y:y+h, x:x+w]
+
+    orig_h, orig_w = image.shape[:2]
+
+    # חישוב שולי ביטחון (Padding)
+    pad_x = int(orig_w * margin_ratio)
+    pad_y = int(orig_h * margin_ratio)
+    avail_w = max(1, orig_w - (2 * pad_x))
+    avail_h = max(1, orig_h - (2 * pad_y))
+
+    # חישוב יחס ההגדלה/הקטנה המקסימלי שנכנס בשטח הזמין
+    scale = min(avail_w / w, avail_h / h)
+    new_w = max(1, int(w * scale))
+    new_h = max(1, int(h * scale))
+
+    # שינוי גודל התוכן תוך שמירה על יחס יבטים (Aspect Ratio)
+    interp = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
+    resized_content = cv2.resize(cropped_content, (new_w, new_h), interpolation=interp)
+
+    # יצירת קנבס נקי בגודל המקורי
+    if len(image.shape) == 3:
+        canvas = np.full((orig_h, orig_w, image.shape[2]), border_value, dtype=np.uint8)
+    else:
+        canvas = np.full((orig_h, orig_w), border_value, dtype=np.uint8)
+
+    # מיקוד התוכן במרכז הקנבס
+    start_x = (orig_w - new_w) // 2
+    start_y = (orig_h - new_h) // 2
+
+    canvas[start_y:start_y + new_h, start_x:start_x + new_w] = resized_content
+
+    return canvas
+
+
+def images_to_dxf(
+    image_input: np.ndarray,
+    output_dxf_path: str,
+    margin_ratio: float = 0.05
+) -> str:
+    """
+    ממירה תמונה מעובדת לקובץ DXF תוך שימוש בשוליים מצומצמים (0.05)
+    כדי למנוע בזבוז שטח במרכז הלוח.
+    """
+    # 1. מרכוז ומניעת חיתוך קצוות
+    centered_img = center_and_scale_image(image_input, margin_ratio=margin_ratio)
+
+    # 2. ייצוא ל-DXF דרך הפונקציה הקיימת במיזם
+    from src.dxf_utils import create_smooth_dxf_from_png
+
+    create_smooth_dxf_from_png(
+        centered_img,
+        output_dxf_path,
+        margin_ratio=margin_ratio
     )
 
-    imf.png_to_dxf(text_location, dxf_text)
-    imf.png_to_dxf(braille_location, dxf_braille)
+    return output_dxf_path
 
-    return dxf_image, dxf_text, dxf_braille
+# def images_to_dxf(image_location, text_location, braille_location):
+#     dxf_image = str(image_location).replace('.png', '.dxf')
+#     dxf_text = str(text_location).replace('.png', '.dxf')
+#     dxf_braille = str(braille_location).replace('.png', '.dxf')
+#
+#     # המרה ל-DXF סגור עם שולי ביטחון (margin_ratio=0.15)
+#     # כדי שלא ייגע בטקסט בעברית ובברייל ולא ייחתך בקצוות למעלה/למטה
+#     imf.create_smooth_dxf_from_png(
+#         image_location,
+#         dxf_image,
+#         canvas_cm=150,
+#         thickness_boost=8,
+#         smoothing=0.5,
+#         margin_ratio=0.22
+#     )
+#
+#     imf.png_to_dxf(text_location, dxf_text)
+#     imf.png_to_dxf(braille_location, dxf_braille)
+#
+#     return dxf_image, dxf_text, dxf_braille
