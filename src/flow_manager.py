@@ -116,73 +116,147 @@ class FlowManager:
         Runs all required steps for a single page.
         Uses temporary state and commits only on success.
         """
-        
         if page.generate_picture:
             self.generate_images(page)
             self.generate_dxfs(page)
-        
-        if page.done:
-            self.generate_stl(page,)
-
+            self.generate_stl(page)
+            page.done = True  # סימון העמוד כהושלם רק לאחר שכל השלבים עברו בהצלחה
 
     # -------------------------
     # Generation steps
     # -------------------------
 
-    def generate_images(self, page: PageState) -> Dict[str, str]:
-        """
-        Calls external image generator (e.g. Dana).
-        """
-            
+    def generate_images(self, page: PageState) -> None:
         page_dir = self.images_dir / f"page_{page.page_number}"
         page_dir.mkdir(parents=True, exist_ok=True)
         hebrew_prompt, picture_type = page.image_description, page.image_classification
-        # Placeholder for Dana call
+
         image_path = page_dir / "image.png"
         braille_path = page_dir / "braille.png"
         text_path = page_dir / "text.png"
 
         create_images(hebrew_prompt, picture_type, image_path, text_path, braille_path)
-        # Example stub writes
+
         images = zip(IMAGES_KEYS, [image_path, text_path, braille_path])
         for key, path in images:
             if os.path.exists(str(path)):
-                page.images_locations[key] = path
+                page.images_locations[key] = str(path)
             else:
                 page.images_locations[key] = None
-        # page.images_locations = images_locations
-            
 
-    def generate_dxfs(
-        self, page: PageState
-    ) -> Dict[str, str]:
-        
+    def generate_dxfs(self, page: PageState) -> None:
         if not page.generate_picture:
             return
-        
-        page_dir = self.images_dir / f"page_{page.page_number}"
-        page_dir.mkdir(parents=True, exist_ok=True)
-        
-        image_location, text_location, braille_location = page.images_locations[IMAGES_KEYS[0]], page.images_locations[IMAGES_KEYS[1]], page.images_locations[IMAGES_KEYS[2]]
-        if image_location is None or  text_location is None or braille_location is None:
+
+        image_location = page.images_locations.get(IMAGES_KEYS[0])
+        text_location = page.images_locations.get(IMAGES_KEYS[1])
+        braille_location = page.images_locations.get(IMAGES_KEYS[2])
+
+        if not all([image_location, text_location, braille_location]):
             raise Exception("An image is missing try generating images again")
-        dxf_image_location, dxf_text_location, dxf_braille_location = images_to_dxf(image_location, text_location, braille_location)
-        images = zip(IMAGES_KEYS, [dxf_image_location, dxf_text_location, dxf_braille_location])
-        for key, path in images:
-            if os.path.exists(str(path)):
-                page.dxf_locations[key] = path
+
+        dxf_image, dxf_text, dxf_braille = images_to_dxf(
+            image_location, text_location, braille_location
+        )
+
+        for key, path in zip(IMAGES_KEYS, [dxf_image, dxf_text, dxf_braille]):
+            if path and os.path.exists(str(path)):
+                page.dxf_locations[key] = str(path)
             else:
                 page.dxf_locations[key] = None
-        
 
-    def generate_stl(
-        self, page: PageState
-    ) -> str:
-        stl_path = self.images_dir / f"page_{page.page_number}.stl"
-        # stl_path.touch()
-        dxf_image_location, dxf_text_location, dxf_braille_location = page.dxf_locations[IMAGES_KEYS[0]], page.dxf_locations[IMAGES_KEYS[1]], page.dxf_locations[IMAGES_KEYS[2]]
-        page.stl_location = create_one_page_stl_from_dxf(dxf_text_location, dxf_braille_location, dxf_image_location, output=stl_path)
-        # return stl_location
+    def generate_stl(self, page: PageState) -> str:
+        # תיקון נתיב היעד לתיקיית stls
+        stl_path = self.stl_dir / f"page_{page.page_number}.stl"
+
+        dxf_image = page.dxf_locations.get(IMAGES_KEYS[0])
+        dxf_text = page.dxf_locations.get(IMAGES_KEYS[1])
+        dxf_braille = page.dxf_locations.get(IMAGES_KEYS[2])
+
+        page.stl_location = create_one_page_stl_from_dxf(
+            dxf_text, dxf_braille, dxf_image, output=str(stl_path)
+        )
+        return page.stl_location
+
+    # -------------------------
+    # Page Processing
+    # -------------------------
+    #
+
+
+
+    # def _process_page(self, page: PageState) -> None:
+    #     """
+    #     Runs all required steps for a single page.
+    #     Uses temporary state and commits only on success.
+    #     """
+    #
+    #     if page.generate_picture:
+    #         self.generate_images(page)
+    #         self.generate_dxfs(page)
+    #
+    #     if page.done:
+    #         self.generate_stl(page,)
+    #
+    #
+    # # -------------------------
+    # # Generation steps
+    # # -------------------------
+    #
+    # def generate_images(self, page: PageState) -> Dict[str, str]:
+    #     """
+    #     Calls external image generator (e.g. Dana).
+    #     """
+    #
+    #     page_dir = self.images_dir / f"page_{page.page_number}"
+    #     page_dir.mkdir(parents=True, exist_ok=True)
+    #     hebrew_prompt, picture_type = page.image_description, page.image_classification
+    #     # Placeholder for Dana call
+    #     image_path = page_dir / "image.png"
+    #     braille_path = page_dir / "braille.png"
+    #     text_path = page_dir / "text.png"
+    #
+    #     create_images(hebrew_prompt, picture_type, image_path, text_path, braille_path)
+    #     # Example stub writes
+    #     images = zip(IMAGES_KEYS, [image_path, text_path, braille_path])
+    #     for key, path in images:
+    #         if os.path.exists(str(path)):
+    #             page.images_locations[key] = path
+    #         else:
+    #             page.images_locations[key] = None
+    #     # page.images_locations = images_locations
+    #
+    #
+    # def generate_dxfs(
+    #     self, page: PageState
+    # ) -> Dict[str, str]:
+    #
+    #     if not page.generate_picture:
+    #         return
+    #
+    #     page_dir = self.images_dir / f"page_{page.page_number}"
+    #     page_dir.mkdir(parents=True, exist_ok=True)
+    #
+    #     image_location, text_location, braille_location = page.images_locations[IMAGES_KEYS[0]], page.images_locations[IMAGES_KEYS[1]], page.images_locations[IMAGES_KEYS[2]]
+    #     if image_location is None or  text_location is None or braille_location is None:
+    #         raise Exception("An image is missing try generating images again")
+    #     dxf_image_location, dxf_text_location, dxf_braille_location = images_to_dxf(image_location, text_location, braille_location)
+    #     images = zip(IMAGES_KEYS, [dxf_image_location, dxf_text_location, dxf_braille_location])
+    #     for key, path in images:
+    #         if os.path.exists(str(path)):
+    #             page.dxf_locations[key] = path
+    #         else:
+    #             page.dxf_locations[key] = None
+    #
+    #
+    # def generate_stl(
+    #     self, page: PageState
+    # ) -> str:
+    #     stl_path = self.images_dir / f"page_{page.page_number}.stl"
+    #     # stl_path.touch()
+    #     dxf_image_location, dxf_text_location, dxf_braille_location = page.dxf_locations[IMAGES_KEYS[0]], page.dxf_locations[IMAGES_KEYS[1]], page.dxf_locations[IMAGES_KEYS[2]]
+    #     page.stl_location = create_one_page_stl_from_dxf(dxf_text_location, dxf_braille_location, dxf_image_location, output=stl_path)
+    #     # return stl_location
 
     # -------------------------
     # Helpers
