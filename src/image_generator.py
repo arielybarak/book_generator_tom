@@ -3,7 +3,7 @@ Stable Diffusion image generation pipeline (used by FlowManager / CLI).
 Responsibilities:
 - _get_pipeline(): lazy singleton that loads the SD model once (segmind/SSD-1B)
 - create_images(): full single-page pipeline — translates Hebrew, runs SD, applies edge detection + centering, saves image PNG, Hebrew text PNG, and Braille PNG.
-- images_to_dxf(): converts the three PNGs produced by create_images() to DXF files.
+- images_to_dxf(): converts the three PNGs produced by create_images() to DXF files with absolute vertical positioning.
 """
 import torch
 import cv2
@@ -102,25 +102,25 @@ def create_images(
 
     braille = lf.convert_to_braille(hebrew_with_nikud)
 
-    # ── עיבוד התמונה לקו נקי ──────────────────────────────────────
+    # ── עיבוד התמונה לקו נקי ואיחוי חורים ──────────────────────────
     img_np = np.array(image)  # Stable Diffusion מחזיר RGB
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
 
-    # טשטוש קטן בלבד
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    # הוספת ריפוד לבן רחב למניעת חיתוך בקצוות המקוריים
+    gray = cv2.copyMakeBorder(gray, 40, 40, 40, 40, cv2.BORDER_CONSTANT, value=255)
 
-    # שחור = קו
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     _, binary = cv2.threshold(blurred, 150, 255, cv2.THRESH_BINARY_INV)
+
+    # סגירת חורים וקצוות פתוחים בקצוות למעלה/למטה
+    close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, close_kernel, iterations=1)
 
     # ניקוי רעשים קטנים
     noise_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, noise_kernel, iterations=1)
 
-    # סגירת רווחים קטנים בלבד
-    bridge_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, bridge_kernel, iterations=1)
-
-    # ניקוי רכיבים קטנים
+    # ניקוי רכיבים קטנים מדי
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
     clean = np.zeros_like(binary)
     for i in range(1, num_labels):
@@ -130,17 +130,9 @@ def create_images(
 
     # לבן = רקע, שחור = ציור
     centered_input = cv2.bitwise_not(clean)
-
-    # הוספת שוליים לבנים מסביב לתמונה לפני מרכוז למניעת חיתוך בקצוות למעלה/למטה
-    pad = 25
-    centered_input = cv2.copyMakeBorder(
-        centered_input, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255
-    )
     h, w = centered_input.shape
 
-    # ------------------------------------------------------------
-    # Centering
-    # ------------------------------------------------------------
+    # מרכוז במשטח
     ys, xs = np.where(centered_input[1:h-1, 1:w-1] == 0)
     if len(xs) > 0:
         shift_x = int(w / 2 - xs.mean())
@@ -162,27 +154,26 @@ def create_images(
     plt.gca().set_facecolor("white")
     display_text = hebrew_with_nikud[::-1] if hebrew_with_nikud else ""
     base_size = 20
-    # אם הטקסט ארוך מ-5 אותיות, הפונט יוקטן בהתאם
     dynamic_fontsize = max(14, base_size - max(0, len(display_text) - 5) * 2)
     plt.text(
-        0.5, 0.1, display_text,
+        0.5, 0.5, display_text,
         fontsize=dynamic_fontsize, color='black',
         ha='center', va='center', fontweight='light', fontname='DejaVu Sans'
     )
     plt.axis("off")
-    plt.savefig(text_output_location, dpi=250, bbox_inches="tight", pad_inches=0)
+    plt.savefig(text_output_location, dpi=250, bbox_inches="tight", pad_inches=0.1)
     plt.close()
 
     # שמירת ברייל PNG
     plt.figure(figsize=(5, 5))
     plt.gca().set_facecolor("white")
     plt.text(
-        0.5, 0.1, braille,
+        0.5, 0.5, braille,
         fontsize=30, color='black',
         ha='center', va='center', fontweight='light', fontname='Noto Sans Symbols2'
     )
     plt.axis("off")
-    plt.savefig(braille_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
+    plt.savefig(braille_output_location, dpi=300, bbox_inches="tight", pad_inches=0.1)
     plt.close()
 
 
@@ -191,18 +182,36 @@ def images_to_dxf(image_location, text_location, braille_location):
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    # המרה ל-DXF סגור עם שולי ביטחון (margin_ratio=0.15)
-    # כדי שלא ייגע בטקסט בעברית ובברייל ולא ייחתך בקצוות למעלה/למטה
-    imf.create_smooth_dxf_from_png(
+    # 1. הציור ממוקם במרכז (בין 28 מ"מ ל-122 מ"מ בגובה)
+    imf.export_png_to_dxf_placed(
         image_location,
         dxf_image,
-        canvas_cm=150,
-        thickness_boost=6,
-        smoothing=0.5,
-        margin_ratio=0.15
+        y_min_mm=28.0,
+        y_max_mm=122.0,
+        canvas_mm=150.0,
+        is_drawing=True,
+        thickness_boost=5,
+        smoothing=0.4
     )
 
-    imf.png_to_dxf(text_location, dxf_text)
-    imf.png_to_dxf(braille_location, dxf_braille)
+    # 2. הטקסט בעברית ממוקם בחלק העליון (בין 128 מ"מ ל-144 מ"מ בגובה)
+    imf.export_png_to_dxf_placed(
+        text_location,
+        dxf_text,
+        y_min_mm=128.0,
+        y_max_mm=144.0,
+        canvas_mm=150.0,
+        is_drawing=False
+    )
+
+    # 3. הברייל ממוקם בחלק התחתון (בין 8 מ"מ ל-22 מ"מ בגובה)
+    imf.export_png_to_dxf_placed(
+        braille_location,
+        dxf_braille,
+        y_min_mm=8.0,
+        y_max_mm=22.0,
+        canvas_mm=150.0,
+        is_drawing=False
+    )
 
     return dxf_image, dxf_text, dxf_braille
