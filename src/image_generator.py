@@ -233,24 +233,19 @@ def images_to_dxf(image_location, text_location, braille_location):
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    # 1. הקטנת התמונה באמצע:
-    # משנים את canvas_cm מ-150 לערך קטן יותר, למשל 100 או 120.
-    imf.vectorize_with_padding_to_dxf(
+    # שימוש רק בפונקציה ששומרת על פוליגונים סגורים
+    imf.create_pencil_dxf_from_png(
         image_location,
         dxf_image,
-        canvas_cm=100  # <--- שחקי עם המספר הזה כדי לשנות את גודל הציור
+        canvas_cm=150,
+        gap_size=31,
+        simplify=1.0
     )
 
-    # 2. הקטנת הטקסט בעברית למעלה:
-    # אנחנו מוסיפים את הפרמטר canvas_cm שעד עכשיו היה על ברירת מחדל של 150.
-    # ערך כמו 70 או 80 יקטין אותו משמעותית.
-    imf.png_to_dxf(
-        text_location,
-        dxf_text,
-        canvas_cm=20   # <--- שחקי עם המספר הזה כדי לשנות את גודל הטקסט
-    )
+    # הוסר: imf.repair_dxf_gaps - אין צורך לצורות נקיות מ-SD
+    # הוסר: imf.repair_pencil_dxf - הורס צורות סגורות בגלל close=False
 
-    # את הברייל נשאיר בינתיים על ברירת המחדל (150) או שתוכלי להקטין גם אותו באותה צורה
+    imf.png_to_dxf(text_location, dxf_text)
     imf.png_to_dxf(braille_location, dxf_braille)
 
     return dxf_image, dxf_text, dxf_braille
