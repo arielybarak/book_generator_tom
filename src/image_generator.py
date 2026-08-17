@@ -185,35 +185,25 @@ def create_images(
     plt.savefig(braille_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
     plt.close()
 
-
 def images_to_dxf(image_location, text_location, braille_location):
     dxf_image = str(image_location).replace('.png', '.dxf')
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    # 1. הציור ממוקם במרכז בלבד (מ-28 מ"מ עד 122 מ"מ בגובה)
-    imf.export_png_to_dxf_placed(
+    # 1. הציור במרכז (28 מ"מ עד 122 מ"מ)
+    imf.create_smooth_dxf_from_png(
         image_location,
         dxf_image,
-        y_min_mm=28.0,
-        y_max_mm=122.0,
-        canvas_mm=150.0,
-        is_drawing=True,
-        thickness_boost=5,
-        smoothing=0.4
+        canvas_cm=150,
+        thickness_boost=6,
+        smoothing=0.5,
+        margin_ratio=0.15
     )
 
-    # 2. הטקסט בעברית ממוקם בחלק העליון בלבד (מ-128 מ"מ עד 144 מ"מ בגובה)
-    imf.export_png_to_dxf_placed(
-        text_location,
-        dxf_text,
-        y_min_mm=128.0,
-        y_max_mm=144.0,
-        canvas_mm=150.0,
-        is_drawing=False
-    )
+    # 2. טקסט בעברית למעלה (128 מ"מ עד 144 מ"מ)
+    imf.png_to_dxf(text_location, dxf_text)
 
-    # 3. הברייל ממוקם בחלק התחתון בלבד (מ-8 מ"מ עד 22 מ"מ בגובה)
+    # 3. ברייל למטה (8 מ"מ עד 22 מ"מ) - מונע את ההתנגשות עם הטקסט
     imf.export_png_to_dxf_placed(
         braille_location,
         dxf_braille,
