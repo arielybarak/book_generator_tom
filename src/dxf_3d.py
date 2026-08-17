@@ -510,9 +510,11 @@ def stroke_polygons_from_centerline(points: List[Point], half_width: float, clos
     """
     Offset a centerline to produce stroke footprint polygons.
 
-    Open paths → single ET_OPENROUND offset.
-    Closed paths → stroke each edge segment individually as OPEN to avoid
-    filled-band artefacts from ET_CLOSEDLINE.
+    Both open and closed paths use ET_OPENROUND on a single polyline.
+    For closed paths the first point is appended so the polyline forms a
+    complete loop — this produces a continuous ring with no inter-segment
+    gaps, while still avoiding the filled-band artefact that
+    ET_CLOSEDLINE / ET_CLOSEDPOLYGON would cause.
     """
     if len(points) < 2:
         return []
@@ -520,21 +522,8 @@ def stroke_polygons_from_centerline(points: List[Point], half_width: float, clos
     if len(pts) < 2:
         return []
 
-    if closed:
-        out: List[List[Point]] = []
-        n = len(pts)
-        for i in range(n):
-            p1, p2 = pts[i], pts[(i + 1) % n]
-            if p1 == p2:
-                continue
-            scaled = [(int(p1[0] * SCALE), int(p1[1] * SCALE)),
-                      (int(p2[0] * SCALE), int(p2[1] * SCALE))]
-            pco = pyclipper.PyclipperOffset()
-            pco.AddPath(scaled, pyclipper.JT_ROUND, pyclipper.ET_OPENROUND)
-            outs = pco.Execute(half_width * SCALE)
-            if outs:
-                out.extend([[(x / SCALE, y / SCALE) for x, y in poly] for poly in outs])
-        return out
+    if closed and pts[0] != pts[-1]:
+        pts = pts + [pts[0]]          # close the loop as an open polyline
 
     scaled = [(int(x * SCALE), int(y * SCALE)) for x, y in pts]
     pco = pyclipper.PyclipperOffset()
