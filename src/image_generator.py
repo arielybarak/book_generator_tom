@@ -1,13 +1,10 @@
 """
 Stable Diffusion image generation pipeline (used by FlowManager / CLI).
-
 Responsibilities:
 - _get_pipeline(): lazy singleton that loads the SD model once (segmind/SSD-1B)
-- create_images(): full single-page pipeline — translates Hebrew, runs SD, applies
-  edge detection + centering, saves image PNG, Hebrew text PNG, and Braille PNG.
+- create_images(): full single-page pipeline — translates Hebrew, runs SD, applies edge detection + centering, saves image PNG, Hebrew text PNG, and Braille PNG.
 - images_to_dxf(): converts the three PNGs produced by create_images() to DXF files.
 """
-
 import torch
 import cv2
 import numpy as np
@@ -17,6 +14,7 @@ from diffusers import AutoPipelineForText2Image
 from src import language_funcs as lf
 from src import image_funcs as imf
 from src.config import cfg
+
 
 # ── Lazy SD pipeline ───────────────────────────────────────────────────────────
 _device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -36,7 +34,6 @@ def _get_pipeline():
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
-
 PRINT_FRIENDLY_STYLE = (
     "icon, symbol, pictogram, single shape, basic geometric form, "
     "child's drawing, crayon sketch, stick figure style, "
@@ -53,6 +50,7 @@ PRINT_FRIENDLY_NEGATIVE = (
     "face, eyes, mouth, person, human features, anthropomorphic, character"
 )
 
+
 def build_print_friendly_prompt(image_desc: str, object_class: str | None = None) -> str:
     subject = f"{object_class}, " if object_class else ""
     return (
@@ -60,15 +58,19 @@ def build_print_friendly_prompt(image_desc: str, object_class: str | None = None
         "single subject, centered composition, children book outline style"
     )
 
+
 def build_negative_prompt() -> str:
     return PRINT_FRIENDLY_NEGATIVE
+
 
 def create_images(
     raw_text,
     variations,
     image_desc,
     object_class,
-    image_output_location, text_output_location, braille_output_location
+    image_output_location,
+    text_output_location,
+    braille_output_location
 ):
     """
     Full single-page pipeline (CLI / FlowManager use).
@@ -84,6 +86,7 @@ def create_images(
     negative_prompt = build_negative_prompt()
 
     pipe = _get_pipeline()
+
     image = pipe(
         prompt=prompt,
         negative_prompt=negative_prompt,
@@ -100,88 +103,39 @@ def create_images(
     braille = lf.convert_to_braille(hebrew_with_nikud)
 
     # ── עיבוד התמונה לקו נקי ──────────────────────────────────────
-
-    img_np = np.array(image)
-
-    # Stable Diffusion מחזיר RGB
-    gray = cv2.cvtColor(
-        img_np,
-        cv2.COLOR_RGB2GRAY
-    )
+    img_np = np.array(image)  # Stable Diffusion מחזיר RGB
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
 
     # טשטוש קטן בלבד
-    blurred = cv2.GaussianBlur(
-        gray,
-        (5, 5),
-        0
-    )
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
     # שחור = קו
-    _, binary = cv2.threshold(
-        blurred,
-        150,
-        255,
-        cv2.THRESH_BINARY_INV
-    )
+    _, binary = cv2.threshold(blurred, 150, 255, cv2.THRESH_BINARY_INV)
 
     # ניקוי רעשים קטנים
-    noise_kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE,
-        (3, 3)
-    )
-
-    binary = cv2.morphologyEx(
-        binary,
-        cv2.MORPH_OPEN,
-        noise_kernel,
-        iterations=1
-    )
+    noise_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, noise_kernel, iterations=1)
 
     # סגירת רווחים קטנים בלבד
-    bridge_kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE,
-        (7, 7)
-    )
-
-    binary = cv2.morphologyEx(
-        binary,
-        cv2.MORPH_CLOSE,
-        bridge_kernel,
-        iterations=1
-    )
+    bridge_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, bridge_kernel, iterations=1)
 
     # ניקוי רכיבים קטנים
-    num_labels, labels, stats, _ = (
-        cv2.connectedComponentsWithStats(
-            binary,
-            connectivity=8
-        )
-    )
-
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
     clean = np.zeros_like(binary)
-
     for i in range(1, num_labels):
-        area = stats[
-            i,
-            cv2.CC_STAT_AREA
-        ]
-
+        area = stats[i, cv2.CC_STAT_AREA]
         if area >= 40:
             clean[labels == i] = 255
 
     # לבן = רקע, שחור = ציור
     centered_input = cv2.bitwise_not(clean)
-
     h, w = centered_input.shape
 
     # ------------------------------------------------------------
     # Centering
     # ------------------------------------------------------------
-
-    ys, xs = np.where(
-        centered_input[1:h-1, 1:w-1] == 0
-    )
-
+    ys, xs = np.where(centered_input[1:h-1, 1:w-1] == 0)
     if len(xs) > 0:
         shift_x = int(w / 2 - xs.mean())
         shift_y = int(h / 2 - ys.mean())
@@ -191,19 +145,11 @@ def create_images(
 
     centered = cv2.warpAffine(
         centered_input,
-        np.float32([
-            [1, 0, shift_x],
-            [0, 1, shift_y]
-        ]),
+        np.float32([[1, 0, shift_x], [0, 1, shift_y]]),
         (w, h),
         borderValue=255
     )
-
-    cv2.imwrite(
-        str(image_output_location),
-        centered
-    )
-
+    cv2.imwrite(str(image_output_location), centered)
 
     # שמירת טקסט בעברית PNG
     plt.figure(figsize=(5, 5))
@@ -212,9 +158,11 @@ def create_images(
     base_size = 20
     # אם הטקסט ארוך מ-5 אותיות, הפונט יוקטן בהתאם
     dynamic_fontsize = max(14, base_size - max(0, len(display_text) - 5) * 2)
-
-    plt.text(0.5, 0.1, display_text, fontsize=dynamic_fontsize, color='black',
-             ha='center', va='center', fontweight='light', fontname='DejaVu Sans')
+    plt.text(
+        0.5, 0.1, display_text,
+        fontsize=dynamic_fontsize, color='black',
+        ha='center', va='center', fontweight='light', fontname='DejaVu Sans'
+    )
     plt.axis("off")
     plt.savefig(text_output_location, dpi=250, bbox_inches="tight", pad_inches=0)
     plt.close()
@@ -222,23 +170,30 @@ def create_images(
     # שמירת ברייל PNG
     plt.figure(figsize=(5, 5))
     plt.gca().set_facecolor("white")
-    plt.text(0.5, 0.1, braille, fontsize=30, color='black',
-             ha='center', va='center', fontweight='light', fontname='Noto Sans Symbols2')
+    plt.text(
+        0.5, 0.1, braille,
+        fontsize=30, color='black',
+        ha='center', va='center', fontweight='light', fontname='Noto Sans Symbols2'
+    )
     plt.axis("off")
     plt.savefig(braille_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
     plt.close()
+
 
 def images_to_dxf(image_location, text_location, braille_location):
     dxf_image = str(image_location).replace('.png', '.dxf')
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    # קריאה לפונקציה החדשה שמוודאת סגירה ללא חורים
-    imf.create_continuous_dxf(
+    # שינוי משמעותי כאן להדפסת תלת מימד:
+    # מעבר מ-create_pencil_dxf_from_png ל-create_smooth_dxf_from_png
+    # הפונקציה הזו סוגרת חורים לחלוטין ויוצרת פוליגונים תלת-מימדיים מוצקים.
+    imf.create_smooth_dxf_from_png(
         image_location,
         dxf_image,
         canvas_cm=150,
-        simplify=0.5
+        thickness_boost=6,  # עיבוי חזק למניעת נתקים בהדפסה
+        smoothing=0.5
     )
 
     imf.png_to_dxf(text_location, dxf_text)
