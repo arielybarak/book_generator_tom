@@ -56,54 +56,26 @@ def _render_text_mask(text, fontprop, width_px, height_px):
     return ink > 127
 
 
-def compose_heightmap(image_gray, hebrew_text, braille_text, cfg):
-    """
-    Flatten the three page layers into one grayscale heightmap (uint8, NxN).
 
-    Layout (top → bottom): Hebrew text band, line-art image band, Braille band.
-    Each layer is painted at its configured gray level = its relative height.
-    Background stays 0 (flat base).
-    """
-    ensure_font()  # downloads/registers the Braille glyph font
+def compose_heightmap(text_img: np.ndarray, drawing_img: np.ndarray, braille_img: np.ndarray, layout_info: dict,
+                      canvas_shape: tuple) -> np.ndarray:
+    """משלבת את כל האלמנטים למפת גבהים אחת תוך התאמה מלאה לשטח התמונה המעודכן."""
+    canvas = np.zeros(canvas_shape, dtype=np.float32)
 
-    # DejaVu Sans is always available; resolve the Braille font by FILE for reliability.
-    text_fp = fm.FontProperties(family="DejaVu Sans")
-    braille_fp = (fm.FontProperties(fname=FONT_FILENAME)
-                  if os.path.exists(FONT_FILENAME)
-                  else fm.FontProperties(family="Noto Sans Symbols2"))
+    # 1. טקסט עליון
+    tx, ty, tw, th = layout_info['text_bbox_px']
+    if text_img is not None and text_img.size > 0:
+        canvas[ty:ty + th, tx:tx + tw] = cv2.resize(text_img, (tw, th))
 
-    lc      = cfg["lithophane"]
-    N       = int(lc["resolution_px"])
-    levels  = lc["levels"]
-    layout  = lc["layout"]
+    # 2. ציור מרכזי
+    ix, iy, iw, ih = layout_info['image_bbox_px']
+    if drawing_img is not None and drawing_img.size > 0:
+        canvas[iy:iy + ih, ix:ix + iw] = cv2.resize(drawing_img, (iw, ih))
 
-    canvas = np.zeros((N, N), dtype=np.uint8)
-
-    text_h = int(layout["text_frac"] * N)
-    brl_h  = int(layout["braille_frac"] * N)
-    img_top, img_bot = text_h, N - brl_h
-
-    # --- Line-art image (middle band): dark SD strokes on white → raised strokes ---
-    img = image_gray
-    if img.ndim == 3:
-        img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    img_mask = img < 128
-    img_mask = cv2.resize(img_mask.astype(np.uint8), (N, img_bot - img_top),
-                          interpolation=cv2.INTER_NEAREST).astype(bool)
-    mid = canvas[img_top:img_bot]            # view
-    mid[img_mask] = int(levels["image"])
-
-    # --- Hebrew text (top band). RTL → reverse for matplotlib (matches image_funcs). ---
-    if hebrew_text:
-        t_mask = _render_text_mask(hebrew_text[::-1], text_fp, N, text_h)
-        top = canvas[0:text_h]
-        top[t_mask] = int(levels["text"])
-
-    # --- Braille (bottom band) ---
-    if braille_text:
-        b_mask = _render_text_mask(braille_text, braille_fp, N, brl_h)
-        bot = canvas[N - brl_h:N]
-        bot[b_mask] = int(levels["braille"])
+    # 3. ברייל תחתון
+    bx, by, bw, bh = layout_info['braille_bbox_px']
+    if braille_img is not None and braille_img.size > 0:
+        canvas[by:by + bh, bx:bx + bw] = cv2.resize(braille_img, (bw, bh))
 
     return canvas
 

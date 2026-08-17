@@ -13,16 +13,12 @@ plate:
 
 # Page layout — three non-overlapping horizontal bands (fractions of usable height):
 #   top = Hebrew text, middle = line-art image, bottom = Braille
-#layout:
-#  text_frac: 0.18
-#  braille_frac: 0.18
-#  band_gap_mm: 4.0
 layout:
-  text_frac: 0.12         # הפחתה מ-0.18
-  braille_frac: 0.12      # הפחתה מ-0.18
-  band_gap_mm: 2.0        # הפחתה מ-4.0
-  margin_mm: 5.0          # הפחתה מ-10.0
-  margin_ratio: 0.05      # הפחתה מ-0.22 (שוליים פנימיים לתמונה)
+  text_frac: 0.12
+  braille_frac: 0.12
+  band_gap_mm: 2.0
+  margin_mm: 5.0
+  margin_ratio: 0.05
 
 
 # ── Tactile ergonomics (tuned for blind child finger exploration) ─────────────
