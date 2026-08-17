@@ -233,12 +233,11 @@ def images_to_dxf(image_location, text_location, braille_location):
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    # קריאה לפונקציה החדשה שמוודאת סגירה ללא חורים
-    imf.create_continuous_dxf(
+    # קריאה לפונקציה החדשה עם השוליים - בלי תיקונים נלווים!
+    imf.vectorize_with_padding_to_dxf(
         image_location,
         dxf_image,
-        canvas_cm=150,
-        simplify=0.5
+        canvas_cm=150
     )
 
     imf.png_to_dxf(text_location, dxf_text)

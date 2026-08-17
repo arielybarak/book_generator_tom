@@ -1818,3 +1818,77 @@ def create_continuous_dxf(image_path, out_path, canvas_cm=150, simplify=0.5):
         msp.add_lwpolyline(points, close=True, dxfattribs={"color": 7})
 
     doc.saveas(out_path)
+
+
+def vectorize_with_padding_to_dxf(image_path, out_path, canvas_cm=150):
+    """
+    ממיר תמונה ל-DXF תוך הבטחה שהצורה מוקפת בשוליים ולכן תיסגר תמיד.
+    בלי אלגוריתמים מסובכים של תיקון, רק מסגרת, זיהוי, והחלקה טבעית.
+    """
+    canvas_mm = canvas_cm * 10.0
+
+    # 1. קריאת התמונה
+    img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        raise RuntimeError(f"Could not load image: {image_path}")
+
+    # --- התיקון הקריטי: הוספת שוליים ---
+    # מוסיף 50 פיקסלים של רקע לבן מכל צד.
+    # זה מבטיח שאם הציור נחתך בקצה, עכשיו יהיה לו גבול ברור לסגור סביבו את הקו.
+    padded_img = cv2.copyMakeBorder(
+        img, 50, 50, 50, 50,
+        cv2.BORDER_CONSTANT, value=255
+    )
+
+    # 2. המרה לשחור-לבן
+    if np.mean(padded_img) > 127:
+        padded_img = cv2.bitwise_not(padded_img)
+    _, bw = cv2.threshold(padded_img, 127, 255, cv2.THRESH_BINARY)
+
+    # 3. מציאת קווי המתאר
+    # שימוש ב-TC89_KCOS עוזר ביצירת קווים עגולים וטבעיים יותר
+    contours, _ = cv2.findContours(bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_KCOS)
+
+    # סינון רעשים קטנים
+    valid_contours = [c for c in contours if cv2.contourArea(c) > 200]
+
+    if not valid_contours:
+        raise RuntimeError(f"No valid contours found in {image_path}")
+
+    # 4. חישוב גבולות וקנה מידה למילימטרים
+    all_pts = np.vstack([c.reshape(-1, 2) for c in valid_contours])
+    min_x, min_y = all_pts.min(axis=0)
+    max_x, max_y = all_pts.max(axis=0)
+
+    width = max_x - min_x + 1
+    height = max_y - min_y + 1
+    scale = canvas_mm / max(width, height)
+
+    offset_x = (canvas_mm - width * scale) / 2.0
+    offset_y = (canvas_mm - height * scale) / 2.0
+
+    def px_to_mm(p):
+        return ((float(p[0]) - min_x) * scale + offset_x,
+                (max_y - float(p[1])) * scale + offset_y)
+
+    # 5. יצירת ה-DXF ושמירה
+    doc = ezdxf.new(setup=True)
+    doc.units = ezdxf.units.MM
+    msp = doc.modelspace()
+
+    for contour in valid_contours:
+        # epsilon=1.5 מעדן את הקו ומעלים את ה"מדרגות" בלי לעוות את הצורה
+        approx = cv2.approxPolyDP(contour, epsilon=1.5, closed=True)
+
+        if len(approx) < 3:
+            continue
+
+        points = [px_to_mm(p[0]) for p in approx]
+
+        # כפיית סגירה גיאומטרית מוחלטת של הפוליגון
+        if points[0] != points[-1]:
+            points.append(points[0])
+
+        msp.add_lwpolyline(points, close=True, dxfattribs={"color": 7})
+
+    doc.saveas(out_path)
