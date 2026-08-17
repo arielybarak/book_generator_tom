@@ -1,187 +1,208 @@
-import os
-from pathlib import Path
-from typing import Optional, Union, Tuple
+"""
+Stable Diffusion image generation pipeline (used by FlowManager / CLI).
+Responsibilities:
+- _get_pipeline(): lazy singleton that loads the SD model once (segmind/SSD-1B)
+- create_images(): full single-page pipeline — translates Hebrew, runs SD, applies edge detection + centering, saves image PNG, Hebrew text PNG, and Braille PNG.
+- images_to_dxf(): converts the three PNGs produced by create_images() to DXF files.
+"""
+import torch
 import cv2
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
+from diffusers import AutoPipelineForText2Image
 
-import src.image_funcs as imf
-import src.language_funcs as lf
+from src import language_funcs as lf
+from src import image_funcs as imf
+from src.config import cfg
 
 
-def add_safety_padding(image: np.ndarray, pad_ratio: float = 0.08) -> np.ndarray:
-    """מוסיפה שולי ביטחון לבנים מסביב לתמונה כדי למנוע נגיעה בקצוות וקטימת מסלולים."""
-    if image is None or image.size == 0:
-        return image
+# ── Lazy SD pipeline ───────────────────────────────────────────────────────────
+_device = "cuda" if torch.cuda.is_available() else "cpu"
+_pipe = None
 
-    h, w = image.shape[:2]
-    pad_y = int(h * pad_ratio)
-    pad_x = int(w * pad_ratio)
-    border_val = [255, 255, 255] if len(image.shape) == 3 else 255
+def _get_pipeline():
+    global _pipe
+    if _pipe is None:
+        sd_cfg = cfg["stable_diffusion"]
+        model_id = sd_cfg.get("image_model_id", sd_cfg["model_id"])
+        dtype = torch.float16 if _device == "cuda" else torch.float32
+        print(f"Loading Stable Diffusion ({model_id}) on {_device}...")
+        _pipe = AutoPipelineForText2Image.from_pretrained(
+            model_id, torch_dtype=dtype
+        ).to(_device)
+    return _pipe
 
-    return cv2.copyMakeBorder(
-        image,
-        top=pad_y,
-        bottom=pad_y,
-        left=pad_x,
-        right=pad_x,
-        borderType=cv2.BORDER_CONSTANT,
-        value=border_val,
+
+# ── Public API ─────────────────────────────────────────────────────────────────
+PRINT_FRIENDLY_STYLE = (
+    "icon, symbol, pictogram, single shape, basic geometric form, "
+    "child's drawing, crayon sketch, stick figure style, "
+    "ultra-minimal, flat solid shape, one color outline only, "
+    "no details, no texture, bold thick line, plain white background"
+)
+
+PRINT_FRIENDLY_NEGATIVE = (
+    "shading, gradients, texture, hatching, crosshatching, fill, solid color, "
+    "photorealistic, complex background, decorative, small details, "
+    "thin lines, clutter, noise, realistic lighting, busy composition, "
+    "interior detail, internal lines, patterns, perspective, 3D effect, "
+    "shadows, highlights, multiple objects, "
+    "face, eyes, mouth, person, human features, anthropomorphic, character"
+)
+
+
+def build_print_friendly_prompt(image_desc: str, object_class: str | None = None) -> str:
+    subject = f"{object_class}, " if object_class else ""
+    return (
+        f"{subject}{image_desc}, {PRINT_FRIENDLY_STYLE}, "
+        "single subject, centered composition, children book outline style"
     )
 
 
-def process_and_center_image(
-    image_input: Union[np.ndarray, str, Path], margin_ratio: float = 0.05
-) -> np.ndarray:
-    """ממרכזת, מרופדת ומכווננת את התמונה כך שאינה נוגעת בקצוות הקנבס."""
-    if isinstance(image_input, (str, Path)):
-        image = cv2.imread(str(image_input))
-        if image is None:
-            raise RuntimeError(f"Could not load image from path: {image_input}")
-    else:
-        image = image_input
-
-    if image is None or image.size == 0:
-        return image
-
-    # 1. הוספת רפוד היקפי ראשוני למניעת נגיעה בקצוות
-    padded_img = add_safety_padding(image, pad_ratio=0.08)
-
-    # 2. זיהוי גבולות התוכן הממשי
-    if len(padded_img.shape) == 3:
-        gray = cv2.cvtColor(padded_img, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = padded_img.copy()
-
-    mask = (gray < 240).astype(np.uint8)
-    coords = cv2.findNonZero(mask)
-
-    if coords is None:
-        return padded_img
-
-    x, y, w, h = cv2.boundingRect(coords)
-    cropped = padded_img[y : y + h, x : x + w]
-
-    # 3. חישוב סקאלה עם שוליים
-    orig_h, orig_w = padded_img.shape[:2]
-    pad_x = int(orig_w * margin_ratio)
-    pad_y = int(orig_h * margin_ratio)
-
-    avail_w = max(1, orig_w - (2 * pad_x))
-    avail_h = max(1, orig_h - (2 * pad_y))
-
-    scale = min(avail_w / w, avail_h / h)
-    new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
-
-    interp = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
-    resized = cv2.resize(cropped, (new_w, new_h), interpolation=interp)
-
-    # 4. יצירת קנבס חדש ומיקום במרכז
-    if len(padded_img.shape) == 3:
-        canvas = np.full(
-            (orig_h, orig_w, padded_img.shape[2]), 255, dtype=np.uint8
-        )
-    else:
-        canvas = np.full((orig_h, orig_w), 255, dtype=np.uint8)
-
-    start_x = (orig_w - new_w) // 2
-    start_y = (orig_h - new_h) // 2
-    canvas[start_y : start_y + new_h, start_x : start_x + new_w] = resized
-
-    return canvas
-
-
-def center_and_scale_image(
-    image: np.ndarray, margin_ratio: float = 0.05
-) -> np.ndarray:
-    return process_and_center_image(image, margin_ratio=margin_ratio)
+def build_negative_prompt() -> str:
+    return PRINT_FRIENDLY_NEGATIVE
 
 
 def create_images(
-    hebrew_prompt: str,
-    picture_type: str,
-    image_path: Union[str, Path],
-    text_path: Union[str, Path],
-    braille_path: Union[str, Path],
-) -> None:
-    """ייצור ושמירת קבצי התמונות (PNG) עבור הציור, הטקסט בעברית והברייל."""
+    raw_text,
+    variations,
+    image_desc,
+    object_class,
+    image_output_location,
+    text_output_location,
+    braille_output_location
+):
+    """
+    Full single-page pipeline (CLI / FlowManager use).
+    Safely attempts nikud addition without crashing web / non-interactive contexts.
+    """
     imf.ensure_font()
 
-    # 1. יצירת תמונת הציור הראשונית (סקיצה שחור-לבן)
-    canvas = np.full((512, 512), 255, dtype=np.uint8)
-    cv2.circle(canvas, (256, 256), 180, 0, 8)  # דוגמת עיגול/תוכן ברירת מחדל
+    eng_desc = lf.hebrew_translator(raw_text)
+    eng_class = lf.hebrew_translator(image_desc)
 
-    processed_img = process_and_center_image(canvas, margin_ratio=0.05)
-    os.makedirs(os.path.dirname(image_path), exist_ok=True)
-    cv2.imwrite(str(image_path), processed_img)
+    sd_cfg = cfg["stable_diffusion"]
+    prompt = build_print_friendly_prompt(eng_desc, eng_class or object_class)
+    negative_prompt = build_negative_prompt()
 
-    # 2. שמירת תמונת הטקסט בעברית
+    pipe = _get_pipeline()
+
+    image = pipe(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        num_inference_steps=sd_cfg["inference_steps"],
+        guidance_scale=sd_cfg["guidance_scale"],
+    ).images[0]
+
+    # ניסיון הוספת ניקוד עם מנגנון הגנה מקריסות
     try:
-        hebrew_text = lf.add_nikud(hebrew_prompt)
-    except Exception:
-        hebrew_text = hebrew_prompt
+        hebrew_with_nikud = lf.add_nikud(raw_text)
+    except (EOFError, Exception):
+        hebrew_with_nikud = raw_text
 
-    display_text = hebrew_text[::-1] if hebrew_text else ""
-    plt.figure(figsize=(5, 2))
+    braille = lf.convert_to_braille(hebrew_with_nikud)
+
+    # ── עיבוד התמונה לקו נקי ──────────────────────────────────────
+    img_np = np.array(image)  # Stable Diffusion מחזיר RGB
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+
+    # טשטוש קטן בלבד
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    # שחור = קו
+    _, binary = cv2.threshold(blurred, 150, 255, cv2.THRESH_BINARY_INV)
+
+    # ניקוי רעשים קטנים
+    noise_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, noise_kernel, iterations=1)
+
+    # סגירת רווחים קטנים ובינוניים כבר בשלב עיבוד ה-PNG
+    bridge_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))  # שונה מ-7 ל-15
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, bridge_kernel, iterations=1)
+
+    # ניקוי רכיבים זעירים בלבד (הורדה מ-40 ל-15 כדי לא למחוק אוזניים/זנב)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    clean = np.zeros_like(binary)
+    for i in range(1, num_labels):
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area >= 15:
+            clean[labels == i] = 255
+
+    # לבן = רקע, שחור = ציור
+    centered_input = cv2.bitwise_not(clean)
+
+    # הוספת שוליים לבנים מסביב לתמונה לפני מרכוז למניעת חיתוך בקצוות למעלה/למטה
+    pad = 45
+    centered_input = cv2.copyMakeBorder(
+        centered_input, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255
+    )
+    h, w = centered_input.shape
+
+    # ------------------------------------------------------------
+    # Centering
+    # ------------------------------------------------------------
+    ys, xs = np.where(centered_input[1:h-1, 1:w-1] == 0)
+    if len(xs) > 0:
+        shift_x = int(w / 2 - xs.mean())
+        shift_y = int(h / 2 - ys.mean())
+    else:
+        shift_x = 0
+        shift_y = 0
+
+    centered = cv2.warpAffine(
+        centered_input,
+        np.float32([[1, 0, shift_x], [0, 1, shift_y]]),
+        (w, h),
+        borderValue=255
+    )
+    cv2.imwrite(str(image_output_location), centered)
+
+    # שמירת טקסט בעברית PNG
+    plt.figure(figsize=(5, 5))
     plt.gca().set_facecolor("white")
+    display_text = hebrew_with_nikud[::-1] if hebrew_with_nikud else ""
+    base_size = 20
+    # אם הטקסט ארוך מ-5 אותיות, הפונט יוקטן בהתאם
+    dynamic_fontsize = max(14, base_size - max(0, len(display_text) - 5) * 2)
     plt.text(
-        0.5,
-        0.5,
-        display_text,
-        fontsize=16,
-        color="black",
-        ha="center",
-        va="center",
+        0.5, 0.1, display_text,
+        fontsize=dynamic_fontsize, color='black',
+        ha='center', va='center', fontweight='light', fontname='DejaVu Sans'
     )
     plt.axis("off")
-    os.makedirs(os.path.dirname(text_path), exist_ok=True)
-    plt.savefig(text_path, dpi=200, bbox_inches="tight", pad_inches=0.3)
+    plt.savefig(text_output_location, dpi=250, bbox_inches="tight", pad_inches=0)
     plt.close()
 
-    # 3. שמירת תמונת הברייל
-    try:
-        braille_text = lf.convert_to_braille(hebrew_text)
-    except Exception:
-        braille_text = hebrew_text
-
-    plt.figure(figsize=(5, 2))
+    # שמירת ברייל PNG
+    plt.figure(figsize=(5, 5))
     plt.gca().set_facecolor("white")
     plt.text(
-        0.5,
-        0.5,
-        braille_text,
-        fontsize=24,
-        color="black",
-        ha="center",
-        va="center",
+        0.5, 0.1, braille,
+        fontsize=30, color='black',
+        ha='center', va='center', fontweight='light', fontname='Noto Sans Symbols2'
     )
     plt.axis("off")
-    os.makedirs(os.path.dirname(braille_path), exist_ok=True)
-    plt.savefig(braille_path, dpi=200, bbox_inches="tight", pad_inches=0.3)
+    plt.savefig(braille_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
     plt.close()
 
 
-def images_to_dxf(
-    image_path: Union[str, Path],
-    text_path: Union[str, Path],
-    braille_path: Union[str, Path],
-) -> Tuple[str, str, str]:
-    """המרת תמונות ה-PNG לקבצי DXF."""
-    dxf_image = str(image_path).replace(".png", ".dxf")
-    dxf_text = str(text_path).replace(".png", ".dxf")
-    dxf_braille = str(braille_path).replace(".png", ".dxf")
+def images_to_dxf(image_location, text_location, braille_location):
+    dxf_image = str(image_location).replace('.png', '.dxf')
+    dxf_text = str(text_location).replace('.png', '.dxf')
+    dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    # קריאה לפונקציה מ-src.image_funcs
-    imf.create_smooth_dxf_from_png(image_path, dxf_image)
+    # המרה ל-DXF סגור עם שולי ביטחון (margin_ratio=0.15)
+    # כדי שלא ייגע בטקסט בעברית ובברייל ולא ייחתך בקצוות למעלה/למטה
+    imf.create_smooth_dxf_from_png(
+        image_location,
+        dxf_image,
+        canvas_cm=150,
+        thickness_boost=8,
+        smoothing=0.5,
+        margin_ratio=0.22
+    )
 
-    try:
-        lf.generate_hebrew_text_dxf(text_path, dxf_text)
-    except Exception:
-        imf.create_smooth_dxf_from_png(text_path, dxf_text)
-
-    try:
-        lf.generate_braille_dxf_from_text(braille_path, dxf_braille)
-    except Exception:
-        imf.create_smooth_dxf_from_png(braille_path, dxf_braille)
+    imf.png_to_dxf(text_location, dxf_text)
+    imf.png_to_dxf(braille_location, dxf_braille)
 
     return dxf_image, dxf_text, dxf_braille
