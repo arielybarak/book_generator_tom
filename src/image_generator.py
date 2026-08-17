@@ -174,7 +174,7 @@ def create_images(
     plt.savefig(braille_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
     plt.close()
 
-def images_to_dxf(image_location, text_location, braille_location):
+def images_to_dxf_old(image_location, text_location, braille_location):
     """Convert the three PNGs produced by create_images() to DXF files."""
     dxf_image = str(image_location).replace('.png', '.dxf')
     dxf_text = str(text_location).replace('.png', '.dxf')
@@ -189,21 +189,19 @@ def images_to_dxf(image_location, text_location, braille_location):
 
     return dxf_image, dxf_text, dxf_braille
 
-def images_to_dxf_old(image_location, text_location, braille_location):
-    """Convert the three PNGs produced by create_images() to DXF files."""
+def images_to_dxf(image_location, text_location, braille_location):
     dxf_image = str(image_location).replace('.png', '.dxf')
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    # 1. עיבוי הקווים בתמונה המקורית כדי לשמור על פרטים בלי שיישברו בתלת-ממד
-    imf.thicken_png_lines(image_location, thickness=8)
+    imf.create_pencil_dxf_from_png(
+        image_location,
+        dxf_image,
+        canvas_cm=150,
+        gap_size=11,
+        simplify=1.2
+    )
 
-    # 2. יצירת ה-DXF המקורי של התמונה (עם פישוט 0.8 למניעת "מדרגות" בשוליים)
-    imf.image_to_dxf_exact(image_location, dxf_image, simplify_epsilon=0.8)
-
-    # (הסרנו בכוונה את heal_dxf_fragments כדי לא להרוס פרטים פנימיים בציור)
-
-    # 3. המרת טקסט וברייל ל-DXF
     imf.png_to_dxf(text_location, dxf_text)
     imf.png_to_dxf(braille_location, dxf_braille)
 

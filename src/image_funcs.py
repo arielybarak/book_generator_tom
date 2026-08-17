@@ -604,3 +604,234 @@ def thicken_png_lines(image_path, thickness=6):
                 msp.add_lwpolyline(pts, close=True, dxfattribs={"color": 7})
 
         doc.saveas(out_path)
+
+
+def create_pencil_dxf_from_png(
+    image_path,
+    out_path,
+    canvas_cm=150,
+    gap_size=15,
+    simplify=1.5
+):
+    """
+    PNG -> DXF בקו מרכזי רציף בסגנון ציור בעיפרון.
+
+    המטרה:
+    - לחבר קטיעות קטנות
+    - להפוך קו עבה לקו מרכזי אחד
+    - להסיר רעשים
+    - לשמור על קו מתאר חלק ואחיד
+    """
+
+    import cv2
+    import numpy as np
+    import ezdxf
+
+    canvas_mm = canvas_cm * 10.0
+
+    # ---------------------------------------------------------
+    # 1. טעינת התמונה
+    # ---------------------------------------------------------
+    img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+
+    if img is None:
+        raise RuntimeError(f"Could not load image: {image_path}")
+
+    # שחור = קו, לבן = רקע
+    _, bw = cv2.threshold(
+        img,
+        180,
+        255,
+        cv2.THRESH_BINARY_INV
+    )
+
+    # ---------------------------------------------------------
+    # 2. ניקוי רעשים קטנים
+    # ---------------------------------------------------------
+    small_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (3, 3)
+    )
+
+    bw = cv2.morphologyEx(
+        bw,
+        cv2.MORPH_OPEN,
+        small_kernel,
+        iterations=1
+    )
+
+    # ---------------------------------------------------------
+    # 3. חיבור קטיעות
+    # ---------------------------------------------------------
+    bridge_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (gap_size, gap_size)
+    )
+
+    bw = cv2.morphologyEx(
+        bw,
+        cv2.MORPH_CLOSE,
+        bridge_kernel,
+        iterations=1
+    )
+
+    # ---------------------------------------------------------
+    # 4. החלקה לפני skeleton
+    # ---------------------------------------------------------
+    bw = cv2.GaussianBlur(
+        bw,
+        (5, 5),
+        0
+    )
+
+    _, bw = cv2.threshold(
+        bw,
+        127,
+        255,
+        cv2.THRESH_BINARY
+    )
+
+    # ---------------------------------------------------------
+    # 5. Skeletonization
+    # ---------------------------------------------------------
+    if hasattr(cv2, "ximgproc"):
+
+        skeleton = cv2.ximgproc.thinning(
+            bw,
+            thinningType=cv2.ximgproc.THINNING_ZHANGSUEN
+        )
+
+    else:
+        raise RuntimeError(
+            "cv2.ximgproc is required. "
+            "Install opencv-contrib-python."
+        )
+
+    # ---------------------------------------------------------
+    # 6. ניקוי נקודות קטנות
+    # ---------------------------------------------------------
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        skeleton,
+        connectivity=8
+    )
+
+    clean = np.zeros_like(skeleton)
+
+    MIN_COMPONENT_SIZE = 30
+
+    for i in range(1, num_labels):
+        if stats[i, cv2.CC_STAT_AREA] >= MIN_COMPONENT_SIZE:
+            clean[labels == i] = 255
+
+    skeleton = clean
+
+    # ---------------------------------------------------------
+    # 7. הגדלה לפני המרת הקו ל-DXF
+    # ---------------------------------------------------------
+    scale_up = 4
+
+    skeleton = cv2.resize(
+        skeleton,
+        None,
+        fx=scale_up,
+        fy=scale_up,
+        interpolation=cv2.INTER_CUBIC
+    )
+
+    skeleton = cv2.GaussianBlur(
+        skeleton,
+        (5, 5),
+        0
+    )
+
+    _, skeleton = cv2.threshold(
+        skeleton,
+        127,
+        255,
+        cv2.THRESH_BINARY
+    )
+
+    # ---------------------------------------------------------
+    # 8. מציאת קווים
+    # ---------------------------------------------------------
+    contours, _ = cv2.findContours(
+        skeleton,
+        cv2.RETR_LIST,
+        cv2.CHAIN_APPROX_NONE
+    )
+
+    contours = [
+        c for c in contours
+        if cv2.arcLength(c, False) > 20
+    ]
+
+    if not contours:
+        raise RuntimeError(
+            f"No usable pencil lines found in {image_path}"
+        )
+
+    # ---------------------------------------------------------
+    # 9. חישוב bounding box
+    # ---------------------------------------------------------
+    all_pts = np.vstack([
+        c.reshape(-1, 2)
+        for c in contours
+    ])
+
+    min_x, min_y = all_pts.min(axis=0)
+    max_x, max_y = all_pts.max(axis=0)
+
+    width = max_x - min_x + 1
+    height = max_y - min_y + 1
+
+    scale = canvas_mm / max(width, height)
+
+    offset_x = (
+        canvas_mm - width * scale
+    ) / 2
+
+    offset_y = (
+        canvas_mm - height * scale
+    ) / 2
+
+    def px_to_mm(p):
+        return (
+            (float(p[0]) - min_x) * scale + offset_x,
+            (max_y - float(p[1])) * scale + offset_y
+        )
+
+    # ---------------------------------------------------------
+    # 10. DXF
+    # ---------------------------------------------------------
+    doc = ezdxf.new(setup=True)
+    doc.units = ezdxf.units.MM
+
+    msp = doc.modelspace()
+
+    for contour in contours:
+
+        epsilon = simplify * scale_up
+
+        approx = cv2.approxPolyDP(
+            contour,
+            epsilon=epsilon,
+            closed=False
+        )
+
+        if len(approx) < 2:
+            continue
+
+        points = [
+            px_to_mm(p[0])
+            for p in approx
+        ]
+
+        msp.add_lwpolyline(
+            points,
+            close=False,
+            dxfattribs={
+                "color": 7
+            }
+        )
+
+    doc.saveas(out_path)
