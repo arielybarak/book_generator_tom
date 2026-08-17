@@ -1106,3 +1106,641 @@ def repair_dxf_gaps(
         f"DXF geometric repair: "
         f"repaired {repaired_count} suspicious gaps"
     )
+
+
+def repair_pencil_dxf(
+    input_dxf,
+    output_dxf,
+    max_gap_mm=25.0,
+    raster_resolution=4,
+    line_thickness_px=5,
+    simplify_mm=0.8,
+):
+    """
+    Repairs broken DXF line drawings WITHOUT relying on DXF contours.
+
+    Strategy:
+        DXF geometry
+            ↓
+        rasterize every LINE / LWPOLYLINE segment
+            ↓
+        morphological gap closing
+            ↓
+        skeletonization
+            ↓
+        trace skeleton paths
+            ↓
+        new DXF
+
+    This is especially useful after create_pencil_dxf_from_png(),
+    where a visually broken line may already have been converted into
+    several separate closed contours.
+
+    max_gap_mm:
+        Maximum physical gap that may be bridged.
+
+    raster_resolution:
+        Number of raster pixels per mm.
+
+    line_thickness_px:
+        Rasterization thickness.
+
+    simplify_mm:
+        Final DXF polyline simplification tolerance.
+    """
+
+    import math
+
+    # ------------------------------------------------------------
+    # 1. Read DXF
+    # ------------------------------------------------------------
+
+    try:
+        doc = ezdxf.readfile(input_dxf)
+    except IOError:
+        raise RuntimeError(
+            f"Could not read DXF: {input_dxf}"
+        )
+
+    msp = doc.modelspace()
+
+    entities = [
+        e for e in msp
+        if e.dxftype() in ("LWPOLYLINE", "POLYLINE", "LINE")
+    ]
+
+    if not entities:
+        raise RuntimeError(
+            f"No drawable line entities found in {input_dxf}"
+        )
+
+    # ------------------------------------------------------------
+    # 2. Extract ALL line segments
+    #
+    # Important:
+    # We deliberately do not care whether the entity is closed.
+    # A closed contour and an open line are treated identically.
+    # ------------------------------------------------------------
+
+    segments = []
+
+    for entity in entities:
+
+        if entity.dxftype() == "LINE":
+
+            p1 = np.array([
+                float(entity.dxf.start.x),
+                float(entity.dxf.start.y)
+            ])
+
+            p2 = np.array([
+                float(entity.dxf.end.x),
+                float(entity.dxf.end.y)
+            ])
+
+            segments.append((p1, p2))
+
+        elif entity.dxftype() == "LWPOLYLINE":
+
+            pts = [
+                np.array(
+                    [float(p[0]), float(p[1])],
+                    dtype=float
+                )
+                for p in entity.get_points("xy")
+            ]
+
+            if len(pts) < 2:
+                continue
+
+            for i in range(len(pts) - 1):
+                segments.append(
+                    (pts[i], pts[i + 1])
+                )
+
+            # Handle closed polyline geometrically.
+            if entity.is_closed and len(pts) >= 3:
+                segments.append(
+                    (pts[-1], pts[0])
+                )
+
+        elif entity.dxftype() == "POLYLINE":
+
+            pts = []
+
+            for vertex in entity.vertices:
+                pts.append(
+                    np.array(
+                        [
+                            float(vertex.dxf.location.x),
+                            float(vertex.dxf.location.y)
+                        ],
+                        dtype=float
+                    )
+                )
+
+            if len(pts) < 2:
+                continue
+
+            for i in range(len(pts) - 1):
+                segments.append(
+                    (pts[i], pts[i + 1])
+                )
+
+            if entity.is_closed:
+                segments.append(
+                    (pts[-1], pts[0])
+                )
+
+    if not segments:
+        raise RuntimeError(
+            f"No usable line segments found in {input_dxf}"
+        )
+
+    # ------------------------------------------------------------
+    # 3. Calculate bounding box
+    # ------------------------------------------------------------
+
+    all_points = np.vstack([
+        np.vstack([a, b])
+        for a, b in segments
+    ])
+
+    min_x, min_y = all_points.min(axis=0)
+    max_x, max_y = all_points.max(axis=0)
+
+    padding_mm = max_gap_mm + 10.0
+
+    min_x -= padding_mm
+    min_y -= padding_mm
+    max_x += padding_mm
+    max_y += padding_mm
+
+    width_mm = max_x - min_x
+    height_mm = max_y - min_y
+
+    # ------------------------------------------------------------
+    # 4. Build raster canvas
+    # ------------------------------------------------------------
+
+    ppm = float(raster_resolution)
+
+    width_px = int(
+        math.ceil(width_mm * ppm)
+    )
+
+    height_px = int(
+        math.ceil(height_mm * ppm)
+    )
+
+    # Safety limit
+    max_dimension = 12000
+
+    if max(width_px, height_px) > max_dimension:
+
+        scale_down = (
+            max_dimension /
+            max(width_px, height_px)
+        )
+
+        ppm *= scale_down
+
+        width_px = int(
+            math.ceil(width_mm * ppm)
+        )
+
+        height_px = int(
+            math.ceil(height_mm * ppm)
+        )
+
+    canvas = np.zeros(
+        (height_px, width_px),
+        dtype=np.uint8
+    )
+
+    def mm_to_px(point):
+        x, y = point
+
+        px = int(
+            round((x - min_x) * ppm)
+        )
+
+        py = int(
+            round((max_y - y) * ppm)
+        )
+
+        return px, py
+
+    # ------------------------------------------------------------
+    # 5. Rasterize ALL geometry
+    #
+    # This is the critical difference from the old repair.
+    #
+    # We don't care whether the DXF contains:
+    #
+    #     contour A
+    #     contour B
+    #     contour C
+    #
+    # Everything becomes one binary geometric field.
+    # ------------------------------------------------------------
+
+    for p1, p2 in segments:
+
+        a = mm_to_px(p1)
+        b = mm_to_px(p2)
+
+        cv2.line(
+            canvas,
+            a,
+            b,
+            255,
+            thickness=max(1, int(line_thickness_px)),
+            lineType=cv2.LINE_AA
+        )
+
+    # ------------------------------------------------------------
+    # 6. Close gaps
+    #
+    # max_gap_mm is converted into pixels.
+    #
+    # Example:
+    # max_gap_mm = 25
+    # raster_resolution = 4
+    #
+    # → approximately 100 px gap-closing radius.
+    # ------------------------------------------------------------
+
+    gap_px = max(
+        3,
+        int(round(max_gap_mm * ppm))
+    )
+
+    # Don't create absurdly large kernels.
+    # Multiple smaller closing operations are more stable.
+    kernel_size = min(
+        gap_px * 2 + 1,
+        401
+    )
+
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    close_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (kernel_size, kernel_size)
+    )
+
+    repaired = cv2.morphologyEx(
+        canvas,
+        cv2.MORPH_CLOSE,
+        close_kernel,
+        iterations=1
+    )
+
+    # ------------------------------------------------------------
+    # 7. Slight dilation before skeletonization
+    #
+    # This helps when two sides of a broken line are very close
+    # but not actually touching after rasterization.
+    # ------------------------------------------------------------
+
+    connect_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (5, 5)
+    )
+
+    repaired = cv2.dilate(
+        repaired,
+        connect_kernel,
+        iterations=1
+    )
+
+    # ------------------------------------------------------------
+    # 8. Skeletonization
+    #
+    # OpenCV does not always contain ximgproc.
+    # Try it first, then use a morphological fallback.
+    # ------------------------------------------------------------
+
+    skeleton = None
+
+    if hasattr(cv2, "ximgproc") and hasattr(
+        cv2.ximgproc,
+        "thinning"
+    ):
+        skeleton = cv2.ximgproc.thinning(
+            repaired
+        )
+
+    else:
+        # Zhang-Suen style morphological skeleton fallback.
+        skeleton = np.zeros_like(repaired)
+        temp = repaired.copy()
+
+        skel_kernel = cv2.getStructuringElement(
+            cv2.MORPH_CROSS,
+            (3, 3)
+        )
+
+        while True:
+
+            eroded = cv2.erode(
+                temp,
+                skel_kernel
+            )
+
+            opened = cv2.dilate(
+                eroded,
+                skel_kernel
+            )
+
+            difference = cv2.subtract(
+                temp,
+                opened
+            )
+
+            skeleton = cv2.bitwise_or(
+                skeleton,
+                difference
+            )
+
+            temp = eroded.copy()
+
+            if cv2.countNonZero(temp) == 0:
+                break
+
+    # ------------------------------------------------------------
+    # 9. Remove isolated tiny noise
+    # ------------------------------------------------------------
+
+    num_labels, labels, stats, _ = (
+        cv2.connectedComponentsWithStats(
+            skeleton,
+            connectivity=8
+        )
+    )
+
+    cleaned_skeleton = np.zeros_like(skeleton)
+
+    # Keep reasonably large connected structures.
+    # Since the DXF is already cleaned, tiny components are noise.
+    min_component_px = max(
+        10,
+        int(ppm * 2)
+    )
+
+    for i in range(1, num_labels):
+
+        area = stats[
+            i,
+            cv2.CC_STAT_AREA
+        ]
+
+        if area >= min_component_px:
+            cleaned_skeleton[
+                labels == i
+            ] = 255
+
+    skeleton = cleaned_skeleton
+
+    # ------------------------------------------------------------
+    # 10. Convert skeleton pixels back into paths
+    #
+    # We trace connected skeleton components.
+    # This is NOT contour-based repair.
+    # Contours are not used to decide where gaps exist.
+    # ------------------------------------------------------------
+
+    num_labels, labels, stats, centroids = (
+        cv2.connectedComponentsWithStats(
+            skeleton,
+            connectivity=8
+        )
+    )
+
+    paths = []
+
+    for label_id in range(1, num_labels):
+
+        component = np.zeros_like(
+            skeleton
+        )
+
+        component[
+            labels == label_id
+        ] = 255
+
+        ys, xs = np.where(
+            component > 0
+        )
+
+        if len(xs) < 5:
+            continue
+
+        # --------------------------------------------------------
+        # Simplest robust tracing:
+        # collect skeleton pixels and order them using nearest
+        # neighbor traversal.
+        # --------------------------------------------------------
+
+        points_px = np.column_stack(
+            [xs, ys]
+        ).astype(float)
+
+        if len(points_px) < 2:
+            continue
+
+        # Start from an endpoint when available.
+        endpoint = None
+
+        point_set = {
+            (int(x), int(y))
+            for x, y in points_px
+        }
+
+        for x, y in point_set:
+
+            neighbours = 0
+
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+
+                    if dx == 0 and dy == 0:
+                        continue
+
+                    if (
+                        x + dx,
+                        y + dy
+                    ) in point_set:
+                        neighbours += 1
+
+            if neighbours == 1:
+                endpoint = np.array(
+                    [x, y],
+                    dtype=float
+                )
+                break
+
+        if endpoint is None:
+            endpoint = points_px[0]
+
+        remaining = points_px.copy()
+
+        ordered = [
+            endpoint
+        ]
+
+        # Remove starting point.
+        distances = np.linalg.norm(
+            remaining - endpoint,
+            axis=1
+        )
+
+        remaining = np.delete(
+            remaining,
+            np.argmin(distances),
+            axis=0
+        )
+
+        current = endpoint
+
+        while len(remaining) > 0:
+
+            distances = np.linalg.norm(
+                remaining - current,
+                axis=1
+            )
+
+            idx = int(
+                np.argmin(distances)
+            )
+
+            next_point = remaining[idx]
+
+            # Stop if this is clearly a separate branch.
+            if (
+                np.linalg.norm(
+                    next_point - current
+                ) > 3.0
+            ):
+                break
+
+            ordered.append(next_point)
+
+            current = next_point
+
+            remaining = np.delete(
+                remaining,
+                idx,
+                axis=0
+            )
+
+        if len(ordered) >= 3:
+            paths.append(
+                np.array(
+                    ordered,
+                    dtype=float
+                )
+            )
+
+    # ------------------------------------------------------------
+    # 11. Convert paths back to DXF
+    # ------------------------------------------------------------
+
+    if not paths:
+        raise RuntimeError(
+            "Repair produced no usable geometry."
+        )
+
+    new_doc = ezdxf.new(setup=True)
+    new_doc.units = ezdxf.units.MM
+
+    new_msp = new_doc.modelspace()
+
+    epsilon_px = max(
+        0.1,
+        simplify_mm * ppm
+    )
+
+    exported = 0
+
+    for path in paths:
+
+        # Remove duplicated consecutive points.
+        filtered = [path[0]]
+
+        for p in path[1:]:
+
+            if np.linalg.norm(
+                p - filtered[-1]
+            ) >= 0.5:
+                filtered.append(p)
+
+        if len(filtered) < 3:
+            continue
+
+        # --------------------------------------------------------
+        # Smooth/simplify skeleton path.
+        # --------------------------------------------------------
+
+        pts = np.array(
+            filtered,
+            dtype=np.float32
+        )
+
+        approx = cv2.approxPolyDP(
+            pts.reshape(-1, 1, 2),
+            epsilon=epsilon_px,
+            closed=False
+        )
+
+        if len(approx) < 2:
+            continue
+
+        dxf_points = []
+
+        for p in approx:
+
+            px, py = p[0]
+
+            x = (
+                px / ppm
+                + min_x
+            )
+
+            y = (
+                max_y
+                - py / ppm
+            )
+
+            dxf_points.append(
+                (
+                    float(x),
+                    float(y)
+                )
+            )
+
+        if len(dxf_points) >= 2:
+
+            new_msp.add_lwpolyline(
+                dxf_points,
+                close=False,
+                dxfattribs={
+                    "color": 7
+                }
+            )
+
+            exported += 1
+
+    if exported == 0:
+        raise RuntimeError(
+            "Repair completed but no DXF paths were exported."
+        )
+
+    new_doc.saveas(output_dxf)
+
+    print(
+        f"DXF raster repair: "
+        f"{exported} paths exported"
+    )

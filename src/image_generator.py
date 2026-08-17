@@ -247,6 +247,15 @@ def images_to_dxf(image_location, text_location, braille_location):
         max_gap_mm=25
     )
 
+    imf.repair_pencil_dxf(
+        dxf_image,
+        dxf_image,
+        max_gap_mm=25,
+        raster_resolution=4,
+        line_thickness_px=5,
+        simplify_mm=0.8,
+    )
+
     imf.png_to_dxf(text_location, dxf_text)
     imf.png_to_dxf(braille_location, dxf_braille)
 
