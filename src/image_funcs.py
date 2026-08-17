@@ -495,7 +495,10 @@ def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_bo
     _, bin_img = cv2.threshold(bin_img, 127, 255, cv2.THRESH_BINARY)
 
     # 3. מציאת קווי מתאר - הורדת הסף ל-15 כדי לא לאבד חלקים
-    contours, _ = cv2.findContours(bin_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_KCOS)
+    # RETR_EXTERNAL: only outer contours — inner "hole" contours are excluded.
+    # Using RETR_TREE was writing interior-hole polylines to the DXF, which dxf_3d.py
+    # then stroked as ridges, producing fragmented / holey tactile shapes.
+    contours, _ = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
     contours = [c for c in contours if cv2.contourArea(c) >= 15]
 
     if not contours:
