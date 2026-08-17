@@ -623,9 +623,6 @@ def create_pencil_dxf_from_png(
     - לשמור על קו מתאר חלק ואחיד
     """
 
-    import cv2
-    import numpy as np
-    import ezdxf
 
     canvas_mm = canvas_cm * 10.0
 

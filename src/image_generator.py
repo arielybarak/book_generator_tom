@@ -98,58 +98,165 @@ def create_images(
         hebrew_with_nikud = raw_text
 
     braille = lf.convert_to_braille(hebrew_with_nikud)
+    #
+    # # ── עיבוד התמונה: סף דק, סגירת רווחים וצינטור ─────────────────────────
+    # # עיבוד התמונה ב-PNG: סף, איחוי חורים עדין וצינטור
+    # img_np = np.array(image)
+    # gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+    #
+    # # 1. טשטוש עדין כדי לגרום לפיקסלים קרובים "לזלוג" אחד לשני
+    # blurred = cv2.GaussianBlur(gray, (7, 7), 0)
+    #
+    # # 2. הפיכה לשחור ולבן (מה ששחור במקור יהפוך ללבן כדי שנוכל לעבד אותו)
+    # _, binary = cv2.threshold(blurred, 150, 255, cv2.THRESH_BINARY_INV)
+    #
+    # # 3. גישור על קטיעות: הרחבה (Dilation) חזקה שמחברת בין מקטעי קו מנותקים
+    # # קרנל גדול (15x15) מבטיח שחורים בגודל של עד 15 פיקסלים ייסגרו לגמרי
+    # kernel_bridge = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    # connected = cv2.dilate(binary, kernel_bridge, iterations=1)
+    #
+    # # 4. החלקת הקו וסגירת חורים פנימיים שנוצרו (Closing)
+    # kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    # connected = cv2.morphologyEx(connected, cv2.MORPH_CLOSE, kernel_close, iterations=2)
+    #
+    # # 5. כיווץ בחזרה (Erosion) כדי להחזיר את הקו לעובי נורמלי
+    # # השתמשנו בקרנל קצת יותר קטן (11x11) כדי להשאיר קו בשרני שמצטלם/מודפס טוב
+    # kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    # thinned = cv2.erode(connected, kernel_erode, iterations=1)
+    #
+    # # 6. ניקוי רעשים (שמירה על צורות גדולות בלבד)
+    # num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(thinned, connectivity=8)
+    # clean = np.zeros_like(thinned)
+    # for i in range(1, num_labels):
+    #     # העלינו ל-50 פיקסלים כי ההרחבה מגדילה גם את הרעשים הקטנים
+    #     if stats[i, cv2.CC_STAT_AREA] >= 50:
+    #         clean[labels == i] = 255
+    #
+    # edges = cv2.bitwise_not(clean)
+    # h, w = edges.shape
+    # edges[h - 1:h, w - 1:w] = 255
+    #
+    # # צינטור התמונה (נשאר ללא שינוי)
+    # ys, xs = np.where(edges[1:h - 1, 1:w - 1] == 0)
+    # if len(xs) > 0:
+    #     shift_x = int(w / 2 - xs.mean())
+    #     shift_y = int(h / 2 - ys.mean())
+    # else:
+    #     shift_x = shift_y = 0
+    #
+    # centered = cv2.warpAffine(
+    #     edges, np.float32([[1, 0, shift_x], [0, 1, shift_y]]), (w, h), borderValue=255
+    # )
+    #
+    # # שמירת תמונת ה-PNG
+    # cv2.imwrite(str(image_output_location), centered)
 
-    # ── עיבוד התמונה: סף דק, סגירת רווחים וצינטור ─────────────────────────
-    # עיבוד התמונה ב-PNG: סף, איחוי חורים עדין וצינטור
+
+    # ── עיבוד התמונה לקו נקי ──────────────────────────────────────
+
     img_np = np.array(image)
-    gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
 
-    # 1. טשטוש עדין כדי לגרום לפיקסלים קרובים "לזלוג" אחד לשני
-    blurred = cv2.GaussianBlur(gray, (7, 7), 0)
+    # Stable Diffusion מחזיר RGB
+    gray = cv2.cvtColor(
+        img_np,
+        cv2.COLOR_RGB2GRAY
+    )
 
-    # 2. הפיכה לשחור ולבן (מה ששחור במקור יהפוך ללבן כדי שנוכל לעבד אותו)
-    _, binary = cv2.threshold(blurred, 150, 255, cv2.THRESH_BINARY_INV)
+    # טשטוש קטן בלבד
+    blurred = cv2.GaussianBlur(
+        gray,
+        (5, 5),
+        0
+    )
 
-    # 3. גישור על קטיעות: הרחבה (Dilation) חזקה שמחברת בין מקטעי קו מנותקים
-    # קרנל גדול (15x15) מבטיח שחורים בגודל של עד 15 פיקסלים ייסגרו לגמרי
-    kernel_bridge = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-    connected = cv2.dilate(binary, kernel_bridge, iterations=1)
+    # שחור = קו
+    _, binary = cv2.threshold(
+        blurred,
+        150,
+        255,
+        cv2.THRESH_BINARY_INV
+    )
 
-    # 4. החלקת הקו וסגירת חורים פנימיים שנוצרו (Closing)
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-    connected = cv2.morphologyEx(connected, cv2.MORPH_CLOSE, kernel_close, iterations=2)
+    # ניקוי רעשים קטנים
+    noise_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (3, 3)
+    )
 
-    # 5. כיווץ בחזרה (Erosion) כדי להחזיר את הקו לעובי נורמלי
-    # השתמשנו בקרנל קצת יותר קטן (11x11) כדי להשאיר קו בשרני שמצטלם/מודפס טוב
-    kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
-    thinned = cv2.erode(connected, kernel_erode, iterations=1)
+    binary = cv2.morphologyEx(
+        binary,
+        cv2.MORPH_OPEN,
+        noise_kernel,
+        iterations=1
+    )
 
-    # 6. ניקוי רעשים (שמירה על צורות גדולות בלבד)
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(thinned, connectivity=8)
-    clean = np.zeros_like(thinned)
+    # סגירת רווחים קטנים בלבד
+    bridge_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (7, 7)
+    )
+
+    binary = cv2.morphologyEx(
+        binary,
+        cv2.MORPH_CLOSE,
+        bridge_kernel,
+        iterations=1
+    )
+
+    # ניקוי רכיבים קטנים
+    num_labels, labels, stats, _ = (
+        cv2.connectedComponentsWithStats(
+            binary,
+            connectivity=8
+        )
+    )
+
+    clean = np.zeros_like(binary)
+
     for i in range(1, num_labels):
-        # העלינו ל-50 פיקסלים כי ההרחבה מגדילה גם את הרעשים הקטנים
-        if stats[i, cv2.CC_STAT_AREA] >= 50:
+        area = stats[
+            i,
+            cv2.CC_STAT_AREA
+        ]
+
+        if area >= 40:
             clean[labels == i] = 255
 
-    edges = cv2.bitwise_not(clean)
-    h, w = edges.shape
-    edges[h - 1:h, w - 1:w] = 255
+    # לבן = רקע, שחור = ציור
+    centered_input = cv2.bitwise_not(clean)
 
-    # צינטור התמונה (נשאר ללא שינוי)
-    ys, xs = np.where(edges[1:h - 1, 1:w - 1] == 0)
+    h, w = centered_input.shape
+
+    # ------------------------------------------------------------
+    # Centering
+    # ------------------------------------------------------------
+
+    ys, xs = np.where(
+        centered_input[1:h-1, 1:w-1] == 0
+    )
+
     if len(xs) > 0:
         shift_x = int(w / 2 - xs.mean())
         shift_y = int(h / 2 - ys.mean())
     else:
-        shift_x = shift_y = 0
+        shift_x = 0
+        shift_y = 0
 
     centered = cv2.warpAffine(
-        edges, np.float32([[1, 0, shift_x], [0, 1, shift_y]]), (w, h), borderValue=255
+        centered_input,
+        np.float32([
+            [1, 0, shift_x],
+            [0, 1, shift_y]
+        ]),
+        (w, h),
+        borderValue=255
     )
 
-    # שמירת תמונת ה-PNG
-    cv2.imwrite(str(image_output_location), centered)
+    cv2.imwrite(
+        str(image_output_location),
+        centered
+    )
+
 
     # שמירת טקסט בעברית PNG
     plt.figure(figsize=(5, 5))
