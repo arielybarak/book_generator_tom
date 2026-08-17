@@ -607,24 +607,24 @@ def create_pencil_dxf_from_png(
     image_path,
     out_path,
     canvas_cm=150,
-    gap_size=15,
+    gap_size=31,
     simplify=1.0
 ):
     """
-    PNG -> DXF רציף וחלק להדפסה תלת-ממדית.
+    PNG -> DXF סגור לחלוטין להדפסה תלת-ממדית.
 
-    עקרונות:
-    - לא משתמשים ב-skeletonization
-    - מחברים רווחים קטנים לפני contour extraction
-    - שומרים קווים פנימיים
-    - כל קו מיוצא כ-polyline סגור
-    - אין פירוק של קווים למקטעים קטנים
+    אין skeletonization.
+    אין קווים פתוחים.
+    כל contour מיוצא כ-polyline סגור.
+    הנקודה הראשונה מתווספת שוב בסוף באופן מפורש,
+    בנוסף ל-close=True, כדי להבטיח סגירה גם בתוכנות
+    שמפרשות DXF בצורה לא מושלמת.
     """
 
     canvas_mm = canvas_cm * 10.0
 
     # ---------------------------------------------------------
-    # 1. טעינת PNG
+    # 1. Load PNG
     # ---------------------------------------------------------
     img = cv2.imread(
         str(image_path),
@@ -637,7 +637,7 @@ def create_pencil_dxf_from_png(
         )
 
     # ---------------------------------------------------------
-    # 2. שחור = קו / לבן = רקע
+    # 2. Black drawing -> white mask
     # ---------------------------------------------------------
     _, bw = cv2.threshold(
         img,
@@ -647,7 +647,7 @@ def create_pencil_dxf_from_png(
     )
 
     # ---------------------------------------------------------
-    # 3. ניקוי רעשים קטנים
+    # 3. Remove tiny noise
     # ---------------------------------------------------------
     open_kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
@@ -662,11 +662,10 @@ def create_pencil_dxf_from_png(
     )
 
     # ---------------------------------------------------------
-    # 4. חיבור רווחים
+    # 4. IMPORTANT:
+    # Close gaps BEFORE contour extraction
     # ---------------------------------------------------------
-    # חשוב:
-    # gap_size הוא בגודל פיקסלים של ה-PNG המקורי.
-    gap_kernel = cv2.getStructuringElement(
+    close_kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
         (gap_size, gap_size)
     )
@@ -674,26 +673,26 @@ def create_pencil_dxf_from_png(
     bw = cv2.morphologyEx(
         bw,
         cv2.MORPH_CLOSE,
-        gap_kernel,
-        iterations=1
+        close_kernel,
+        iterations=2
     )
 
     # ---------------------------------------------------------
-    # 5. עיבוי קטן כדי למנוע חורים מיקרוסקופיים
+    # 5. Small dilation to guarantee touching
     # ---------------------------------------------------------
-    thicken_kernel = cv2.getStructuringElement(
+    connect_kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
-        (3, 3)
+        (5, 5)
     )
 
     bw = cv2.dilate(
         bw,
-        thicken_kernel,
+        connect_kernel,
         iterations=1
     )
 
     # ---------------------------------------------------------
-    # 6. החלקה
+    # 6. Smooth
     # ---------------------------------------------------------
     bw = cv2.GaussianBlur(
         bw,
@@ -709,14 +708,7 @@ def create_pencil_dxf_from_png(
     )
 
     # ---------------------------------------------------------
-    # 7. מציאת contours
-    #
-    # RETR_TREE שומר גם:
-    # - contour חיצוני
-    # - contour פנימי
-    # - פרטים פנימיים
-    #
-    # בניגוד ל-skeletonization, אנחנו לא שוברים את הקו.
+    # 7. Find CLOSED contours
     # ---------------------------------------------------------
     contours, hierarchy = cv2.findContours(
         bw,
@@ -726,18 +718,13 @@ def create_pencil_dxf_from_png(
 
     if not contours:
         raise RuntimeError(
-            f"No usable contours found in {image_path}"
+            f"No contours found in {image_path}"
         )
 
-    # ---------------------------------------------------------
-    # 8. סינון רעשים
-    # ---------------------------------------------------------
-    MIN_AREA = 50
-
+    # Remove tiny components
     contours = [
         c for c in contours
-        if cv2.contourArea(c) >= MIN_AREA
-        or cv2.arcLength(c, True) >= 30
+        if cv2.contourArea(c) >= 50
     ]
 
     if not contours:
@@ -746,7 +733,7 @@ def create_pencil_dxf_from_png(
         )
 
     # ---------------------------------------------------------
-    # 9. Bounding box
+    # 8. Bounding box
     # ---------------------------------------------------------
     all_pts = np.vstack([
         c.reshape(-1, 2)
@@ -776,21 +763,28 @@ def create_pencil_dxf_from_png(
         )
 
     # ---------------------------------------------------------
-    # 10. DXF
+    # 9. Create DXF
     # ---------------------------------------------------------
     doc = ezdxf.new(setup=True)
     doc.units = ezdxf.units.MM
 
     msp = doc.modelspace()
 
+    exported = 0
+
     for contour in contours:
 
-        # epsilon קטן כדי לשמור על העיגול
-        epsilon = simplify
+        perimeter = cv2.arcLength(
+            contour,
+            True
+        )
+
+        if perimeter < 30:
+            continue
 
         approx = cv2.approxPolyDP(
             contour,
-            epsilon=epsilon,
+            epsilon=simplify,
             closed=True
         )
 
@@ -802,6 +796,14 @@ def create_pencil_dxf_from_png(
             for p in approx
         ]
 
+        # -----------------------------------------------------
+        # CRITICAL:
+        # Explicitly repeat first point at the end.
+        # -----------------------------------------------------
+        if points[0] != points[-1]:
+            points.append(points[0])
+
+        # DXF closed polyline
         msp.add_lwpolyline(
             points,
             close=True,
@@ -810,9 +812,45 @@ def create_pencil_dxf_from_png(
             }
         )
 
+        exported += 1
+
+    if exported == 0:
+        raise RuntimeError(
+            f"No usable closed contours found in {image_path}"
+        )
+
     doc.saveas(out_path)
 
     print(
-        f"Created continuous DXF: {out_path} "
-        f"({len(contours)} contours)"
+        f"Created CLOSED DXF: {out_path}"
     )
+    print(
+        f"Closed contours exported: {exported}"
+    )
+
+def validate_dxf_closed(dxf_path):
+    doc = ezdxf.readfile(dxf_path)
+    msp = doc.modelspace()
+
+    open_count = 0
+    closed_count = 0
+
+    for entity in msp:
+
+        if entity.dxftype() == "LWPOLYLINE":
+
+            if entity.is_closed:
+                closed_count += 1
+            else:
+                open_count += 1
+
+    print("DXF validation:")
+    print("  closed:", closed_count)
+    print("  open:", open_count)
+
+    if open_count > 0:
+        raise RuntimeError(
+            f"DXF contains {open_count} OPEN polylines!"
+        )
+
+    return True

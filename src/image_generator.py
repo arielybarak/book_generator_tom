@@ -240,7 +240,7 @@ def images_to_dxf(image_location, text_location, braille_location):
         gap_size=21,
         simplify=1.0
     )
-
+    imf.validate_dxf_closed(dxf_image)
     imf.png_to_dxf(text_location, dxf_text)
     imf.png_to_dxf(braille_location, dxf_braille)
 
