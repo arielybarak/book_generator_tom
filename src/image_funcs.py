@@ -608,30 +608,37 @@ def create_pencil_dxf_from_png(
     out_path,
     canvas_cm=150,
     gap_size=15,
-    simplify=1.5
+    simplify=1.0
 ):
     """
-    PNG -> DXF בקו מרכזי רציף בסגנון ציור בעיפרון.
+    PNG -> DXF רציף וחלק להדפסה תלת-ממדית.
 
-    המטרה:
-    - לחבר קטיעות קטנות
-    - להפוך קו עבה לקו מרכזי אחד
-    - להסיר רעשים
-    - לשמור על קו מתאר חלק ואחיד
+    עקרונות:
+    - לא משתמשים ב-skeletonization
+    - מחברים רווחים קטנים לפני contour extraction
+    - שומרים קווים פנימיים
+    - כל קו מיוצא כ-polyline סגור
+    - אין פירוק של קווים למקטעים קטנים
     """
-
 
     canvas_mm = canvas_cm * 10.0
 
     # ---------------------------------------------------------
-    # 1. טעינת התמונה
+    # 1. טעינת PNG
     # ---------------------------------------------------------
-    img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+    img = cv2.imread(
+        str(image_path),
+        cv2.IMREAD_GRAYSCALE
+    )
 
     if img is None:
-        raise RuntimeError(f"Could not load image: {image_path}")
+        raise RuntimeError(
+            f"Could not load image: {image_path}"
+        )
 
-    # שחור = קו, לבן = רקע
+    # ---------------------------------------------------------
+    # 2. שחור = קו / לבן = רקע
+    # ---------------------------------------------------------
     _, bw = cv2.threshold(
         img,
         180,
@@ -640,9 +647,9 @@ def create_pencil_dxf_from_png(
     )
 
     # ---------------------------------------------------------
-    # 2. ניקוי רעשים קטנים
+    # 3. ניקוי רעשים קטנים
     # ---------------------------------------------------------
-    small_kernel = cv2.getStructuringElement(
+    open_kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
         (3, 3)
     )
@@ -650,14 +657,16 @@ def create_pencil_dxf_from_png(
     bw = cv2.morphologyEx(
         bw,
         cv2.MORPH_OPEN,
-        small_kernel,
+        open_kernel,
         iterations=1
     )
 
     # ---------------------------------------------------------
-    # 3. חיבור קטיעות
+    # 4. חיבור רווחים
     # ---------------------------------------------------------
-    bridge_kernel = cv2.getStructuringElement(
+    # חשוב:
+    # gap_size הוא בגודל פיקסלים של ה-PNG המקורי.
+    gap_kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
         (gap_size, gap_size)
     )
@@ -665,12 +674,26 @@ def create_pencil_dxf_from_png(
     bw = cv2.morphologyEx(
         bw,
         cv2.MORPH_CLOSE,
-        bridge_kernel,
+        gap_kernel,
         iterations=1
     )
 
     # ---------------------------------------------------------
-    # 4. החלקה לפני skeleton
+    # 5. עיבוי קטן כדי למנוע חורים מיקרוסקופיים
+    # ---------------------------------------------------------
+    thicken_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (3, 3)
+    )
+
+    bw = cv2.dilate(
+        bw,
+        thicken_kernel,
+        iterations=1
+    )
+
+    # ---------------------------------------------------------
+    # 6. החלקה
     # ---------------------------------------------------------
     bw = cv2.GaussianBlur(
         bw,
@@ -686,86 +709,44 @@ def create_pencil_dxf_from_png(
     )
 
     # ---------------------------------------------------------
-    # 5. Skeletonization
+    # 7. מציאת contours
+    #
+    # RETR_TREE שומר גם:
+    # - contour חיצוני
+    # - contour פנימי
+    # - פרטים פנימיים
+    #
+    # בניגוד ל-skeletonization, אנחנו לא שוברים את הקו.
     # ---------------------------------------------------------
-    if hasattr(cv2, "ximgproc"):
+    contours, hierarchy = cv2.findContours(
+        bw,
+        cv2.RETR_TREE,
+        cv2.CHAIN_APPROX_TC89_KCOS
+    )
 
-        skeleton = cv2.ximgproc.thinning(
-            bw,
-            thinningType=cv2.ximgproc.THINNING_ZHANGSUEN
-        )
-
-    else:
+    if not contours:
         raise RuntimeError(
-            "cv2.ximgproc is required. "
-            "Install opencv-contrib-python."
+            f"No usable contours found in {image_path}"
         )
 
     # ---------------------------------------------------------
-    # 6. ניקוי נקודות קטנות
+    # 8. סינון רעשים
     # ---------------------------------------------------------
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-        skeleton,
-        connectivity=8
-    )
-
-    clean = np.zeros_like(skeleton)
-
-    MIN_COMPONENT_SIZE = 30
-
-    for i in range(1, num_labels):
-        if stats[i, cv2.CC_STAT_AREA] >= MIN_COMPONENT_SIZE:
-            clean[labels == i] = 255
-
-    skeleton = clean
-
-    # ---------------------------------------------------------
-    # 7. הגדלה לפני המרת הקו ל-DXF
-    # ---------------------------------------------------------
-    scale_up = 4
-
-    skeleton = cv2.resize(
-        skeleton,
-        None,
-        fx=scale_up,
-        fy=scale_up,
-        interpolation=cv2.INTER_CUBIC
-    )
-
-    skeleton = cv2.GaussianBlur(
-        skeleton,
-        (5, 5),
-        0
-    )
-
-    _, skeleton = cv2.threshold(
-        skeleton,
-        127,
-        255,
-        cv2.THRESH_BINARY
-    )
-
-    # ---------------------------------------------------------
-    # 8. מציאת קווים
-    # ---------------------------------------------------------
-    contours, _ = cv2.findContours(
-        skeleton,
-        cv2.RETR_LIST,
-        cv2.CHAIN_APPROX_NONE
-    )
+    MIN_AREA = 50
 
     contours = [
         c for c in contours
-        if cv2.arcLength(c, False) > 20
+        if cv2.contourArea(c) >= MIN_AREA
+        or cv2.arcLength(c, True) >= 30
     ]
 
     if not contours:
         raise RuntimeError(
-            f"No usable pencil lines found in {image_path}"
+            f"No significant contours found in {image_path}"
         )
 
     # ---------------------------------------------------------
-    # 9. חישוב bounding box
+    # 9. Bounding box
     # ---------------------------------------------------------
     all_pts = np.vstack([
         c.reshape(-1, 2)
@@ -782,11 +763,11 @@ def create_pencil_dxf_from_png(
 
     offset_x = (
         canvas_mm - width * scale
-    ) / 2
+    ) / 2.0
 
     offset_y = (
         canvas_mm - height * scale
-    ) / 2
+    ) / 2.0
 
     def px_to_mm(p):
         return (
@@ -804,15 +785,16 @@ def create_pencil_dxf_from_png(
 
     for contour in contours:
 
-        epsilon = simplify * scale_up
+        # epsilon קטן כדי לשמור על העיגול
+        epsilon = simplify
 
         approx = cv2.approxPolyDP(
             contour,
             epsilon=epsilon,
-            closed=False
+            closed=True
         )
 
-        if len(approx) < 2:
+        if len(approx) < 3:
             continue
 
         points = [
@@ -822,10 +804,15 @@ def create_pencil_dxf_from_png(
 
         msp.add_lwpolyline(
             points,
-            close=False,
+            close=True,
             dxfattribs={
                 "color": 7
             }
         )
 
     doc.saveas(out_path)
+
+    print(
+        f"Created continuous DXF: {out_path} "
+        f"({len(contours)} contours)"
+    )

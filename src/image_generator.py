@@ -237,8 +237,8 @@ def images_to_dxf(image_location, text_location, braille_location):
         image_location,
         dxf_image,
         canvas_cm=150,
-        gap_size=11,
-        simplify=0.25
+        gap_size=21,
+        simplify=1.0
     )
 
     imf.png_to_dxf(text_location, dxf_text)
