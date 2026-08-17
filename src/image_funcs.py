@@ -143,3 +143,81 @@ def png_to_dxf(png_path, dxf_path, canvas_cm=150):
         canvas_mm=canvas_cm * 1.0,
         is_drawing=False
     )
+
+def export_png_to_dxf_placed(
+    png_path,
+    dxf_path,
+    y_min_mm,
+    y_max_mm,
+    canvas_mm=150.0,
+    is_drawing=False,
+    thickness_boost=5,
+    smoothing=0.3
+):
+    """
+    ממיר PNG ל-DXF וממקם אותו במדויק בתוך טווח אנכי מוגדר [y_min_mm, y_max_mm].
+    כולל איחוי מורפולוגי לאטימת קווים פתוחים/חורים בחלק העליון והתחתון.
+    """
+    img = cv2.imread(str(png_path), cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        raise RuntimeError(f"Could not load image: {png_path}")
+
+    # הוספת שוליים לבנים רחבים למניעת חיתוך בקצוות הפריים
+    pad = 50
+    img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
+
+    # המרה לשחור-לבן מוחלט (255 = קו/טקסט, 0 = רקע)
+    if np.mean(img) > 127:
+        img = cv2.bitwise_not(img)
+    _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
+
+    if is_drawing:
+        # איחוי וסגירת חורים/קווים פתוחים בקצוות
+        close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (19, 19))
+        bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, close_kernel, iterations=2)
+
+        # עיבוי הקווים ליצירת דפנות חזקות להדפסה
+        dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (thickness_boost, thickness_boost))
+        bin_img = cv2.dilate(bin_img, dilate_kernel, iterations=1)
+        bin_img = cv2.GaussianBlur(bin_img, (5, 5), 0)
+        _, bin_img = cv2.threshold(bin_img, 127, 255, cv2.THRESH_BINARY)
+
+    contours, _ = cv2.findContours(bin_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_KCOS)
+    contours = [c for c in contours if cv2.contourArea(c) >= 30]
+
+    if not contours:
+        print(f"Warning: no contours found for {dxf_path}")
+        return
+
+    all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
+    min_x, min_y = all_pts.min(axis=0)
+    max_x, max_y = all_pts.max(axis=0)
+
+    w_px = max_x - min_x + 1
+    h_px = max_y - min_y + 1
+
+    target_height_mm = y_max_mm - y_min_mm
+    target_width_mm = canvas_mm - 20.0  # שומר 10 מ"מ מכל צד
+
+    scale = min(target_width_mm / w_px, target_height_mm / h_px)
+
+    offset_x = (canvas_mm - w_px * scale) / 2.0
+    offset_y = y_min_mm + (target_height_mm - h_px * scale) / 2.0
+
+    def px_to_mm(p):
+        x_mm = (p[0] - min_x) * scale + offset_x
+        y_mm = offset_y + (max_y - p[1]) * scale
+        return (x_mm, y_mm)
+
+    doc = ezdxf.new(setup=True)
+    doc.units = ezdxf.units.MM
+    msp = doc.modelspace()
+
+    epsilon = smoothing if is_drawing else 0.4
+    for c in contours:
+        approx = cv2.approxPolyDP(c, epsilon=epsilon, closed=True)
+        pts = [px_to_mm(p[0]) for p in approx]
+        if len(pts) > 2:
+            msp.add_lwpolyline(pts, close=True, dxfattribs={"color": 7})
+
+    doc.saveas(dxf_path)
