@@ -469,7 +469,7 @@ def thicken_png_lines(image_path, thickness=6):
     cv2.imwrite(str(image_path), final_img)
 
 
-def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_boost=3, smoothing=0.3, margin_ratio=0.35):
+def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_boost=3, smoothing=0.3, margin_ratio=0.15):
     """
     ממיר תמונת PNG ל-DXF בצורה חלקה ומדויקת להדפסת תלת מימד.
     מוודא שאין חורים ושהקווים הם "קירות" סגורים עם עובי.
