@@ -254,7 +254,7 @@ def process_image_to_dxf(img_array, output_path, canvas_cm=150):
     doc.saveas(output_path)
 
 
-def png_to_dxf(png_path, dxf_path, canvas_cm=130):
+def png_to_dxf(png_path, dxf_path, canvas_cm=100):
     """Convert a PNG file to a DXF using external contour extraction."""
     canvas_mm = canvas_cm * 10.0
     img = cv2.imread(png_path, cv2.IMREAD_GRAYSCALE)
