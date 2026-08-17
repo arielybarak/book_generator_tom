@@ -130,6 +130,12 @@ def create_images(
 
     # לבן = רקע, שחור = ציור
     centered_input = cv2.bitwise_not(clean)
+
+    # הוספת שוליים לבנים מסביב לתמונה לפני מרכוז למניעת חיתוך בקצוות למעלה/למטה
+    pad = 25
+    centered_input = cv2.copyMakeBorder(
+        centered_input, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255
+    )
     h, w = centered_input.shape
 
     # ------------------------------------------------------------
@@ -185,15 +191,15 @@ def images_to_dxf(image_location, text_location, braille_location):
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    # שינוי משמעותי כאן להדפסת תלת מימד:
-    # מעבר מ-create_pencil_dxf_from_png ל-create_smooth_dxf_from_png
-    # הפונקציה הזו סוגרת חורים לחלוטין ויוצרת פוליגונים תלת-מימדיים מוצקים.
+    # המרה ל-DXF סגור עם שולי ביטחון (margin_ratio=0.15)
+    # כדי שלא ייגע בטקסט בעברית ובברייל ולא ייחתך בקצוות למעלה/למטה
     imf.create_smooth_dxf_from_png(
         image_location,
         dxf_image,
         canvas_cm=150,
-        thickness_boost=6,  # עיבוי חזק למניעת נתקים בהדפסה
-        smoothing=0.5
+        thickness_boost=6,
+        smoothing=0.5,
+        margin_ratio=0.15
     )
 
     imf.png_to_dxf(text_location, dxf_text)

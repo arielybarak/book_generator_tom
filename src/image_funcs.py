@@ -100,26 +100,25 @@ def heal_dxf_fragments(input_dxf, output_dxf, max_gap_mm=20.0, simplify_epsilon=
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
     fused = cv2.dilate(canvas, kernel, iterations=1)
 
-    # 3. מילוי חורים פנימיים לחלוטין (מבטיח שלא יהיו חורים בתוך החתול)
+    # 3. מילוי חורים פנימיים לחלוטין
     contours, _ = cv2.findContours(fused, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     fused_filled = np.zeros_like(fused)
     cv2.fillPoly(fused_filled, contours, 255)
 
-    # 4. שלב הכיווץ חזרה (Erosion) - מחזיר את הצורה לגודל המקורי
+    # 4. שלב הכיווץ חזרה (Erosion)
     restored = cv2.erode(fused_filled, kernel, iterations=1)
 
     # החלקה אחרונה למראה טבעי ונעים למגע
     restored = cv2.GaussianBlur(restored, (11, 11), 0)
     _, restored = cv2.threshold(restored, 127, 255, cv2.THRESH_BINARY)
 
-    # 5. חילוץ ושמירת קו המתאר *החיצוני היחיד* ל-DXF
+    # 5. חילוץ ושמירת קו המתאר החיצוני היחיד ל-DXF
     final_contours, _ = cv2.findContours(restored, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
 
     new_doc = ezdxf.new(setup=True)
     new_doc.units = ezdxf.units.MM
     new_msp = new_doc.modelspace()
 
-    # ניקח רק את הצורה הגדולה ביותר כדי לסנן לכלוכים שנותרו בחוץ
     if final_contours:
         largest_contour = max(final_contours, key=cv2.contourArea)
         approx = cv2.approxPolyDP(largest_contour, epsilon=simplify_epsilon * ppm, closed=True)
@@ -143,7 +142,6 @@ def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0, 
     """
     canvas_mm = canvas_cm * 10.0
 
-    # Accept either path or numpy array
     if isinstance(image_bw, (str, os.PathLike)):
         img = cv2.imread(str(image_bw), cv2.IMREAD_GRAYSCALE)
         if img is None:
@@ -156,38 +154,30 @@ def image_to_dxf_exact(image_bw, out_path, canvas_cm=150, simplify_epsilon=2.0, 
     if img.dtype != np.uint8:
         img = img.astype(np.uint8)
 
-    # We want white object/lines on black background
     if np.mean(img) > 127:
         img = cv2.bitwise_not(img)
     _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
 
-    # Smooth pixel staircase before contour extraction
     upscale = 4
     bin_img = cv2.resize(
         bin_img, None, fx=upscale, fy=upscale, interpolation=cv2.INTER_CUBIC,
     )
 
-    # Blur + threshold removes jagged pixel steps
     bin_img = cv2.GaussianBlur(bin_img, (5, 5), 0)
     _, bin_img = cv2.threshold(bin_img, 127, 255, cv2.THRESH_BINARY)
 
-    # ── מנגנון התיקון והשלמת הקווים המקוטעים ──
     if bridge_gaps:
-        # 1. סגירה אגרסיבית (Closing) לחיבור נתקים גדולים
         close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (35, 35))
         bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, close_kernel, iterations=1)
 
-        # 2. הרחבה (Dilation) ולאחריה כיווץ (Erosion)
         dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
         erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
         bin_img = cv2.dilate(bin_img, dilate_kernel, iterations=1)
         bin_img = cv2.erode(bin_img, erode_kernel, iterations=1)
 
-        # 3. ניקוי רעשים (Opening) - מחיקת "איים" קטנים ולכלוכים
         open_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
         bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, open_kernel, iterations=1)
     else:
-        # ההתנהגות הישנה (גישור חלש)
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, kernel, iterations=1)
         bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, kernel, iterations=1)
@@ -479,10 +469,11 @@ def thicken_png_lines(image_path, thickness=6):
     cv2.imwrite(str(image_path), final_img)
 
 
-def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_boost=3, smoothing=0.3):
+def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_boost=3, smoothing=0.3, margin_ratio=0.15):
     """
     ממיר תמונת PNG ל-DXF בצורה חלקה ומדויקת להדפסת תלת מימד.
     מוודא שאין חורים ושהקווים הם "קירות" סגורים עם עובי.
+    כולל מרווח ביטחון (margin_ratio) למניעת מגע או חיתוך בקצוות ובטקסט.
     """
     canvas_mm = canvas_cm * 10.0
 
@@ -491,40 +482,47 @@ def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_bo
     if img is None:
         raise RuntimeError(f"Could not load image: {image_path}")
 
+    # הוספת שוליים לבנים מסביב לתמונה כדי למנוע חיתוך בקצוות הפיזיים
+    pad = 30
+    img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
+
     # המרה לשחור-לבן מוחלט
     if np.mean(img) > 127:
         img = cv2.bitwise_not(img)
     _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
 
-    # 2. סגירת חורים קריטית (Closing) כדי לוודא שאין נתקים לפני תלת מימד
+    # 2. סגירת חורים קריטית (Closing)
     bridge_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, bridge_kernel, iterations=1)
 
-    # איחוי ועיבוי אגרסיבי של הקו כדי שלא ייווצרו שבירות בהדפסה
+    # איחוי ועיבוי הקו למניעת נתקים ושבירות
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (thickness_boost, thickness_boost))
     bin_img = cv2.dilate(bin_img, kernel, iterations=1)
 
-    # החלקה קלה לטשטוש מדרגות פיקסלים
+    # החלקה קלה
     bin_img = cv2.GaussianBlur(bin_img, (5, 5), 0)
     _, bin_img = cv2.threshold(bin_img, 127, 255, cv2.THRESH_BINARY)
 
-    # 3. מציאת קווי המתאר (RETR_TREE מזהה חלל פנימי וחיצוני - חובה לתלת מימד)
+    # 3. מציאת קווי המתאר
     contours, _ = cv2.findContours(bin_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_KCOS)
 
-    # סינון רעשים - התעלמות מנקודות קטנטנות
+    # סינון רעשים
     contours = [c for c in contours if cv2.contourArea(c) >= 50]
     if not contours:
         print(f"Warning: no significant contours for {out_path}")
         return
 
-    # 4. חישוב קנה מידה ומרכוז
+    # 4. חישוב קנה מידה ומרכוז עם מרווח ביטחון למעלה ולמטה
     all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
     min_x, min_y = all_pts.min(axis=0)
     max_x, max_y = all_pts.max(axis=0)
 
     w_px = max_x - min_x + 1
     h_px = max_y - min_y + 1
-    scale = canvas_mm / max(w_px, h_px)
+
+    # שטח מוקטן במרכז (למשל 70% מנפח המשטח) כדי להשאיר שוליים מרווחים מהטקסט העברי/ברייל
+    usable_canvas_mm = canvas_mm * (1.0 - 2 * margin_ratio)
+    scale = usable_canvas_mm / max(w_px, h_px)
 
     offset_x = (canvas_mm - w_px * scale) / 2
     offset_y = (canvas_mm - h_px * scale) / 2
@@ -535,7 +533,7 @@ def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_bo
             (max_y - p[1]) * scale + offset_y,
         )
 
-    # 5. יצירת קובץ ה-DXF עם close=True ליצירת אובייקט סגור לחלוטין
+    # 5. יצירת קובץ ה-DXF
     doc = ezdxf.new(setup=True)
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
@@ -552,36 +550,29 @@ def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_bo
 def create_pencil_dxf_from_png(image_path, out_path, canvas_cm=150, gap_size=15, simplify=1.5):
     """
     PNG -> DXF בקו מרכזי רציף בסגנון ציור בעיפרון (Skeleton).
-    (פחות מתאים להדפסת תלת מימד רגילה עקב חוסר עובי, לכן החלפנו אותה באפיק הראשי)
     """
     canvas_mm = canvas_cm * 10.0
 
-    # 1. טעינת התמונה
     img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise RuntimeError(f"Could not load image: {image_path}")
 
     _, bw = cv2.threshold(img, 180, 255, cv2.THRESH_BINARY_INV)
 
-    # 2. ניקוי רעשים
     small_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     bw = cv2.morphologyEx(bw, cv2.MORPH_OPEN, small_kernel, iterations=1)
 
-    # 3. חיבור קטיעות
     bridge_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (gap_size, gap_size))
     bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, bridge_kernel, iterations=1)
 
-    # 4. החלקה
     bw = cv2.GaussianBlur(bw, (5, 5), 0)
     _, bw = cv2.threshold(bw, 127, 255, cv2.THRESH_BINARY)
 
-    # 5. Skeletonization
     if hasattr(cv2, "ximgproc"):
         skeleton = cv2.ximgproc.thinning(bw, thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
     else:
         raise RuntimeError("cv2.ximgproc is required. Install opencv-contrib-python.")
 
-    # 6. ניקוי נקודות קטנות
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(skeleton, connectivity=8)
     clean = np.zeros_like(skeleton)
     MIN_COMPONENT_SIZE = 30
@@ -590,20 +581,17 @@ def create_pencil_dxf_from_png(image_path, out_path, canvas_cm=150, gap_size=15,
             clean[labels == i] = 255
     skeleton = clean
 
-    # 7. הגדלה
     scale_up = 4
     skeleton = cv2.resize(skeleton, None, fx=scale_up, fy=scale_up, interpolation=cv2.INTER_CUBIC)
     skeleton = cv2.GaussianBlur(skeleton, (5, 5), 0)
     _, skeleton = cv2.threshold(skeleton, 127, 255, cv2.THRESH_BINARY)
 
-    # 8. מציאת קווים
     contours, _ = cv2.findContours(skeleton, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
     contours = [c for c in contours if cv2.arcLength(c, False) > 20]
 
     if not contours:
         raise RuntimeError(f"No usable pencil lines found in {image_path}")
 
-    # 9. Bounding box
     all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
     min_x, min_y = all_pts.min(axis=0)
     max_x, max_y = all_pts.max(axis=0)
@@ -621,7 +609,6 @@ def create_pencil_dxf_from_png(image_path, out_path, canvas_cm=150, gap_size=15,
             (max_y - float(p[1])) * scale + offset_y
         )
 
-    # 10. DXF
     doc = ezdxf.new(setup=True)
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
