@@ -513,8 +513,9 @@ def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_bo
     usable_canvas_mm = canvas_mm * (1.0 - 2 * margin_ratio)
     scale = usable_canvas_mm / max(w_px, h_px)
 
-    offset_x = (canvas_mm - w_px * scale) / 2
-    offset_y = (canvas_mm - h_px * scale) / 2
+    margin_mm = canvas_mm * margin_ratio  # e.g. 1500 * 0.22 = 330mm
+    offset_x = margin_mm + (usable_canvas_mm - w_px * scale) / 2  # ✓ consistent
+    offset_y = margin_mm + (usable_canvas_mm - h_px * scale) / 2  # ✓ consistent
 
     def px_to_mm(p):
         return (
