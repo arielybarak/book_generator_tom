@@ -233,17 +233,13 @@ def images_to_dxf(image_location, text_location, braille_location):
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
 
-    # שימוש רק בפונקציה ששומרת על פוליגונים סגורים
-    imf.create_pencil_dxf_from_png(
+    # קריאה לפונקציה החדשה שמוודאת סגירה ללא חורים
+    imf.create_continuous_dxf(
         image_location,
         dxf_image,
         canvas_cm=150,
-        gap_size=31,
-        simplify=1.0
+        simplify=0.5
     )
-
-    # הוסר: imf.repair_dxf_gaps - אין צורך לצורות נקיות מ-SD
-    # הוסר: imf.repair_pencil_dxf - הורס צורות סגורות בגלל close=False
 
     imf.png_to_dxf(text_location, dxf_text)
     imf.png_to_dxf(braille_location, dxf_braille)
