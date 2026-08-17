@@ -186,13 +186,14 @@ def create_images(
     plt.close()
 
 
+
 def images_to_dxf(image_location, text_location, braille_location):
-    dxf_image = str(image_location).replace('.png', '.dxf')
     dxf_text = str(text_location).replace('.png', '.dxf')
     dxf_braille = str(braille_location).replace('.png', '.dxf')
+    dxf_image = str(image_location).replace('.png', '.dxf')
 
-    # המרה ל-DXF סגור עם שולי ביטחון (margin_ratio=0.15)
-    # כדי שלא ייגע בטקסט בעברית ובברייל ולא ייחתך בקצוות למעלה/למטה
+    imf.png_to_dxf(text_location, dxf_text)
+    imf.png_to_dxf(braille_location, dxf_braille)
     imf.create_smooth_dxf_from_png(
         image_location,
         dxf_image,
@@ -202,7 +203,5 @@ def images_to_dxf(image_location, text_location, braille_location):
         margin_ratio=0.22
     )
 
-    imf.png_to_dxf(text_location, dxf_text)
-    imf.png_to_dxf(braille_location, dxf_braille)
 
     return dxf_image, dxf_text, dxf_braille
