@@ -247,7 +247,7 @@ def images_to_dxf(image_location, text_location, braille_location):
     imf.png_to_dxf(
         text_location,
         dxf_text,
-        canvas_cm=80   # <--- שחקי עם המספר הזה כדי לשנות את גודל הטקסט
+        canvas_cm=20   # <--- שחקי עם המספר הזה כדי לשנות את גודל הטקסט
     )
 
     # את הברייל נשאיר בינתיים על ברירת המחדל (150) או שתוכלי להקטין גם אותו באותה צורה
