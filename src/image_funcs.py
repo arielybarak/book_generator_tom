@@ -1744,3 +1744,77 @@ def repair_pencil_dxf(
         f"DXF raster repair: "
         f"{exported} paths exported"
     )
+
+
+def create_continuous_dxf(image_path, out_path, canvas_cm=150, simplify=0.5):
+    """
+    פונקציה חסרת פשרות ליצירת DXF רציף וסגור לחלוטין.
+    מתעלמת מרעשים קטנים, סוגרת את הצורה בצורה אגרסיבית לפני זיהוי,
+    ומייצאת רק פוליגונים הרמטיים.
+    """
+    canvas_mm = canvas_cm * 10.0
+
+    # 1. קריאת התמונה
+    img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        raise RuntimeError(f"Could not load image: {image_path}")
+
+    # 2. המרה לשחור-לבן (לבן = קו, שחור = רקע)
+    if np.mean(img) > 127:
+        img = cv2.bitwise_not(img)
+    _, bw = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
+
+    # 3. איחוי אגרסיבי של נתקים (Closing) + עיבוי (Dilation)
+    # מבטיח רציפות מוחלטת של הקו בתמונה עצמה לפני המעבר לווקטור
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+
+    bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, kernel_close, iterations=2)
+    bw = cv2.dilate(bw, kernel_dilate, iterations=1)
+
+    # 4. מציאת קווי מתאר - RETR_TREE שומר גם על החלק הפנימי וגם החיצוני של העובי
+    contours, hierarchy = cv2.findContours(bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    # סינון רעשים קטנים מאוד כדי למנוע קווים מרחפים ב-DXF
+    valid_contours = [c for c in contours if cv2.contourArea(c) > 500]
+
+    if not valid_contours:
+        raise RuntimeError(f"No valid contours found in {image_path}")
+
+    # 5. חישוב גבולות לקנה מידה
+    all_pts = np.vstack([c.reshape(-1, 2) for c in valid_contours])
+    min_x, min_y = all_pts.min(axis=0)
+    max_x, max_y = all_pts.max(axis=0)
+
+    width = max_x - min_x + 1
+    height = max_y - min_y + 1
+    scale = canvas_mm / max(width, height)
+
+    offset_x = (canvas_mm - width * scale) / 2.0
+    offset_y = (canvas_mm - height * scale) / 2.0
+
+    def px_to_mm(p):
+        return ((float(p[0]) - min_x) * scale + offset_x,
+                (max_y - float(p[1])) * scale + offset_y)
+
+    # 6. יצירת קובץ ה-DXF
+    doc = ezdxf.new(setup=True)
+    doc.units = ezdxf.units.MM
+    msp = doc.modelspace()
+
+    for contour in valid_contours:
+        approx = cv2.approxPolyDP(contour, epsilon=simplify, closed=True)
+
+        if len(approx) < 3:
+            continue
+
+        points = [px_to_mm(p[0]) for p in approx]
+
+        # 7. וידוא סגירה גיאומטרית מוחלטת
+        if points[0] != points[-1]:
+            points.append(points[0])
+
+        # יצירת קו רציף סגור
+        msp.add_lwpolyline(points, close=True, dxfattribs={"color": 7})
+
+    doc.saveas(out_path)
