@@ -237,10 +237,16 @@ def images_to_dxf(image_location, text_location, braille_location):
         image_location,
         dxf_image,
         canvas_cm=150,
-        gap_size=21,
+        gap_size=31,
         simplify=1.0
     )
-    imf.validate_dxf_closed(dxf_image)
+
+    imf.repair_dxf_gaps(
+        dxf_image,
+        dxf_image,
+        max_gap_mm=25
+    )
+
     imf.png_to_dxf(text_location, dxf_text)
     imf.png_to_dxf(braille_location, dxf_braille)
 

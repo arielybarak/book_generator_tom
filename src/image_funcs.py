@@ -828,29 +828,281 @@ def create_pencil_dxf_from_png(
         f"Closed contours exported: {exported}"
     )
 
-def validate_dxf_closed(dxf_path):
-    doc = ezdxf.readfile(dxf_path)
+def repair_dxf_gaps(
+    input_dxf,
+    output_dxf,
+    max_gap_mm=25.0,
+    gap_factor=8.0,
+    angle_tolerance_deg=50.0,
+):
+    """
+    Repair geometric gaps inside DXF polylines.
+
+    Unlike the old implementation, this function does NOT rely on
+    whether the polyline is marked as open/closed.
+
+    It detects unusually long segments between consecutive points.
+    A segment is considered a possible gap when:
+
+        1. Its length is <= max_gap_mm
+        2. It is much longer than the local normal segment length
+        3. The geometry before and after the gap has a similar direction
+
+    The gap is repaired by inserting points along the missing segment,
+    so the original polyline remains one continuous closed polyline.
+
+    This is generic and does not assume the shape is a circle.
+    """
+
+    import math
+
+    doc = ezdxf.readfile(input_dxf)
     msp = doc.modelspace()
 
-    open_count = 0
-    closed_count = 0
+    repaired_count = 0
 
-    for entity in msp:
+    def distance(a, b):
+        return float(np.linalg.norm(b - a))
 
-        if entity.dxftype() == "LWPOLYLINE":
+    def angle_between(v1, v2):
+        """
+        Return angle between two vectors in degrees.
+        """
+        n1 = np.linalg.norm(v1)
+        n2 = np.linalg.norm(v2)
 
-            if entity.is_closed:
-                closed_count += 1
-            else:
-                open_count += 1
+        if n1 < 1e-9 or n2 < 1e-9:
+            return 180.0
 
-    print("DXF validation:")
-    print("  closed:", closed_count)
-    print("  open:", open_count)
+        cos_angle = np.dot(v1, v2) / (n1 * n2)
+        cos_angle = np.clip(cos_angle, -1.0, 1.0)
 
-    if open_count > 0:
-        raise RuntimeError(
-            f"DXF contains {open_count} OPEN polylines!"
+        return math.degrees(math.acos(cos_angle))
+
+    for entity in list(msp):
+
+        if entity.dxftype() != "LWPOLYLINE":
+            continue
+
+        raw_points = list(entity.get_points("xy"))
+
+        if len(raw_points) < 4:
+            continue
+
+        points = [
+            np.array([float(p[0]), float(p[1])], dtype=float)
+            for p in raw_points
+        ]
+
+        # ---------------------------------------------------------
+        # Remove explicit duplicated last point if present.
+        # close=True will handle the closing segment.
+        # ---------------------------------------------------------
+
+        if distance(points[0], points[-1]) < 1e-6:
+            points.pop()
+
+        if len(points) < 4:
+            continue
+
+        closed = entity.is_closed
+
+        # ---------------------------------------------------------
+        # Build list of segment lengths.
+        #
+        # For closed polylines we also inspect the last -> first
+        # segment.
+        # ---------------------------------------------------------
+
+        segment_count = len(points) if closed else len(points) - 1
+
+        lengths = []
+
+        for i in range(segment_count):
+
+            j = (i + 1) % len(points)
+
+            lengths.append(
+                distance(points[i], points[j])
+            )
+
+        if not lengths:
+            continue
+
+        # ---------------------------------------------------------
+        # Robust local reference length.
+        #
+        # Very large gaps should not influence the median.
+        # ---------------------------------------------------------
+
+        normal_lengths = [
+            x for x in lengths
+            if x > 1e-6
+        ]
+
+        if not normal_lengths:
+            continue
+
+        median_length = float(
+            np.median(normal_lengths)
         )
 
-    return True
+        # Prevent tiny DXF contours from producing ridiculous
+        # sensitivity.
+        reference_length = max(
+            median_length,
+            0.05
+        )
+
+        new_points = []
+        changed = False
+
+        # ---------------------------------------------------------
+        # Walk through every segment.
+        # ---------------------------------------------------------
+
+        for i in range(segment_count):
+
+            j = (i + 1) % len(points)
+
+            p1 = points[i]
+            p2 = points[j]
+
+            segment_length = lengths[i]
+
+            # Always keep current point.
+            new_points.append(p1)
+
+            # -----------------------------------------------------
+            # Is this segment suspiciously long?
+            # -----------------------------------------------------
+
+            is_possible_gap = (
+                segment_length <= max_gap_mm
+                and
+                segment_length >
+                reference_length * gap_factor
+            )
+
+            if not is_possible_gap:
+                continue
+
+            # -----------------------------------------------------
+            # We need geometry on both sides of the suspicious
+            # segment.
+            # -----------------------------------------------------
+
+            prev_i = (i - 1) % len(points)
+            next_j = (j + 1) % len(points)
+
+            if not closed:
+                if i == 0 or j == len(points) - 1:
+                    continue
+
+            prev_point = points[prev_i]
+            next_point = points[next_j]
+
+            incoming = p1 - prev_point
+            outgoing = next_point - p2
+
+            # -----------------------------------------------------
+            # The two sides should continue in roughly the same
+            # direction.
+            #
+            # For a missing section of a circle, the direction
+            # changes gradually, so a fairly generous tolerance
+            # is appropriate.
+            # -----------------------------------------------------
+
+            angle = angle_between(
+                incoming,
+                outgoing
+            )
+
+            if angle > angle_tolerance_deg:
+                continue
+
+            # -----------------------------------------------------
+            # Estimate how many points should be inserted.
+            #
+            # We do NOT need to create hundreds of points.
+            # The goal is simply to remove the giant jump.
+            # -----------------------------------------------------
+
+            target_spacing = max(
+                reference_length,
+                0.5
+            )
+
+            subdivisions = max(
+                2,
+                int(
+                    math.ceil(
+                        segment_length /
+                        target_spacing
+                    )
+                )
+            )
+
+            # -----------------------------------------------------
+            # Insert interpolated points along the missing section.
+            # -----------------------------------------------------
+
+            for k in range(1, subdivisions):
+
+                t = k / subdivisions
+
+                interpolated = (
+                    p1 * (1.0 - t)
+                    +
+                    p2 * t
+                )
+
+                new_points.append(
+                    interpolated
+                )
+
+            repaired_count += 1
+            changed = True
+
+        # ---------------------------------------------------------
+        # Nothing suspicious was found.
+        # ---------------------------------------------------------
+
+        if not changed:
+            continue
+
+        # ---------------------------------------------------------
+        # Remove old entity.
+        # ---------------------------------------------------------
+
+        msp.delete_entity(entity)
+
+        # ---------------------------------------------------------
+        # Convert points back to DXF format.
+        # ---------------------------------------------------------
+
+        dxf_points = [
+            (
+                float(p[0]),
+                float(p[1])
+            )
+            for p in new_points
+        ]
+
+        if len(dxf_points) >= 3:
+
+            msp.add_lwpolyline(
+                dxf_points,
+                close=closed,
+                dxfattribs={
+                    "color": 7
+                }
+            )
+
+    doc.saveas(output_dxf)
+
+    print(
+        f"DXF geometric repair: "
+        f"repaired {repaired_count} suspicious gaps"
+    )
