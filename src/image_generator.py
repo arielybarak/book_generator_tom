@@ -116,16 +116,16 @@ def create_images(
     noise_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, noise_kernel, iterations=1)
 
-    # סגירת רווחים קטנים בלבד
-    bridge_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    # סגירת רווחים קטנים ובינוניים כבר בשלב עיבוד ה-PNG
+    bridge_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))  # שונה מ-7 ל-15
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, bridge_kernel, iterations=1)
 
-    # ניקוי רכיבים קטנים
+    # ניקוי רכיבים זעירים בלבד (הורדה מ-40 ל-15 כדי לא למחוק אוזניים/זנב)
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
     clean = np.zeros_like(binary)
     for i in range(1, num_labels):
         area = stats[i, cv2.CC_STAT_AREA]
-        if area >= 40:
+        if area >= 15:
             clean[labels == i] = 255
 
     # לבן = רקע, שחור = ציור
@@ -197,9 +197,9 @@ def images_to_dxf(image_location, text_location, braille_location):
         image_location,
         dxf_image,
         canvas_cm=150,
-        thickness_boost=6,
+        thickness_boost=8,
         smoothing=0.5,
-        margin_ratio=0.25
+        margin_ratio=0.22
     )
 
     imf.png_to_dxf(text_location, dxf_text)

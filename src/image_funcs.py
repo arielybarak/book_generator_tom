@@ -254,7 +254,7 @@ def process_image_to_dxf(img_array, output_path, canvas_cm=150):
     doc.saveas(output_path)
 
 
-def png_to_dxf(png_path, dxf_path, canvas_cm=150):
+def png_to_dxf(png_path, dxf_path, canvas_cm=130):
     """Convert a PNG file to a DXF using external contour extraction."""
     canvas_mm = canvas_cm * 10.0
     img = cv2.imread(png_path, cv2.IMREAD_GRAYSCALE)
@@ -468,51 +468,41 @@ def thicken_png_lines(image_path, thickness=6):
     final_img = cv2.bitwise_not(thickened)
     cv2.imwrite(str(image_path), final_img)
 
-
-def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_boost=3, smoothing=0.3, margin_ratio=0.25):
-    """
-    ממיר תמונת PNG ל-DXF בצורה חלקה ומדויקת להדפסת תלת מימד.
-    מוודא שאין חורים ושהקווים הם "קירות" סגורים עם עובי.
-    כולל מרווח ביטחון (margin_ratio) למניעת מגע או חיתוך בקצוות ובטקסט.
-    """
+def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_boost=8, smoothing=0.5, margin_ratio=0.22):
     canvas_mm = canvas_cm * 10.0
 
-    # 1. טעינת התמונה
     img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise RuntimeError(f"Could not load image: {image_path}")
 
-    # הוספת שוליים לבנים מסביב לתמונה כדי למנוע חיתוך בקצוות הפיזיים
     pad = 30
     img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
 
-    # המרה לשחור-לבן מוחלט
     if np.mean(img) > 127:
         img = cv2.bitwise_not(img)
     _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
 
-    # 2. סגירת חורים קריטית (Closing)
-    bridge_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    # 1. איחוי נתקים וחורים בקווים (הגדלה מ-11 ל-25 כדי לחבר קווים שבורים)
+    bridge_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25))
     bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, bridge_kernel, iterations=1)
 
-    # איחוי ועיבוי הקו למניעת נתקים ושבירות
+    # 2. עיבוי הקו ליצירת דפנות חזקות ב-3D
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (thickness_boost, thickness_boost))
-    bin_img = cv2.dilate(bin_img, kernel, iterations=1)
+    bin_img = cv2.dilate(bin_img, kernel, iterations=2)
 
     # החלקה קלה
     bin_img = cv2.GaussianBlur(bin_img, (5, 5), 0)
     _, bin_img = cv2.threshold(bin_img, 127, 255, cv2.THRESH_BINARY)
 
-    # 3. מציאת קווי המתאר
+    # 3. מציאת קווי מתאר - הורדת הסף ל-15 כדי לא לאבד חלקים
     contours, _ = cv2.findContours(bin_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_KCOS)
+    contours = [c for c in contours if cv2.contourArea(c) >= 15]
 
-    # סינון רעשים
-    contours = [c for c in contours if cv2.contourArea(c) >= 50]
     if not contours:
         print(f"Warning: no significant contours for {out_path}")
         return
 
-    # 4. חישוב קנה מידה ומרכוז עם מרווח ביטחון למעלה ולמטה
+    # חישוב גודל ומרכוז
     all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
     min_x, min_y = all_pts.min(axis=0)
     max_x, max_y = all_pts.max(axis=0)
@@ -520,7 +510,6 @@ def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_bo
     w_px = max_x - min_x + 1
     h_px = max_y - min_y + 1
 
-    # שטח מוקטן במרכז (למשל 70% מנפח המשטח) כדי להשאיר שוליים מרווחים מהטקסט העברי/ברייל
     usable_canvas_mm = canvas_mm * (1.0 - 2 * margin_ratio)
     scale = usable_canvas_mm / max(w_px, h_px)
 
@@ -533,7 +522,6 @@ def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_bo
             (max_y - p[1]) * scale + offset_y,
         )
 
-    # 5. יצירת קובץ ה-DXF
     doc = ezdxf.new(setup=True)
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
@@ -545,7 +533,6 @@ def create_smooth_dxf_from_png(image_path, out_path, canvas_cm=150, thickness_bo
             msp.add_lwpolyline(pts, close=True, dxfattribs={"color": 7})
 
     doc.saveas(out_path)
-
 
 def create_pencil_dxf_from_png(image_path, out_path, canvas_cm=150, gap_size=15, simplify=1.5):
     """
