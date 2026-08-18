@@ -25,8 +25,8 @@ tactile:
   image_outline_height_mm: 2.2      # main contours (tallest — primary shapes to trace)
   image_detail_height_mm: 0.0       # DISABLED — no inner details for ultra-simple shapes
   text_height_mm: 1.0               # raised Hebrew text (sighted adult reads aloud)
-  braille_dot_height_mm: 0.6        # Braille dome height above base
-  braille_dot_radius_mm: 0.75       # standard Grade 1 Braille dot radius
+  braille_dot_height_mm: 1.2        # Braille dome height above base
+  braille_dot_radius_mm: 1.5        # Braille dot radius
 
   # Line widths — wider lines are easier to feel
   image_outline_width_mm: 1.8       # bolder strokes = simpler, less fragile

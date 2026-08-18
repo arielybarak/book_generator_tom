@@ -394,10 +394,10 @@ def generate_hebrew_text_dxf(hebrew_text, output_path):
     generate_text_dxf(hebrew_text, output_path, rtl=True)
 
 
-# ── Braille geometry (Grade-1, millimetres) ───────────────────────────────────────
-BRAILLE_DOT_SPACING_MM = 2.5
-BRAILLE_CELL_SPACING_MM = 6.0
-BRAILLE_DOT_RADIUS_MM = 0.75
+# ── Braille geometry (millimetres) ────────────────────────────────────────────────
+BRAILLE_DOT_SPACING_MM = 5.0
+BRAILLE_CELL_SPACING_MM = 12.0
+BRAILLE_DOT_RADIUS_MM = 1.5
 
 _BRAILLE_DOT_CELL = {0: (0, 0), 1: (0, 1), 2: (0, 2), 3: (1, 0), 4: (1, 1), 5: (1, 2)}
 
