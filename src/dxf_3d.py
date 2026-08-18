@@ -245,17 +245,9 @@ def layout_content_on_base(
     t_txt = _fit_transform(text_shapes, [], x0, txt_y0, x1, txt_y1)
     text_out = _xform_paths(text_shapes, *t_txt) if t_txt else text_shapes
 
-    # Braille → bottom band at its NATIVE Grade-1 size (it is generated at fixed mm
-    # spacing). Do NOT stretch it to fill the band — that would blow up the dot gaps for
-    # short words. Centre it; only shrink if a long word would overflow the plate width.
-    bx0, by0, bx1, by1 = bbox_of_paths([], braille_circles)
-    bw, bh = bx1 - bx0, by1 - by0
-    if bw > 0 and bh > 0:
-        s_brl = min(1.0, (x1 - x0) / bw, (brl_y1 - brl_y0) / bh)
-        brl_out = _xform_circles(braille_circles, s_brl, (bx0 + bx1) / 2.0, (by0 + by1) / 2.0,
-                                 (x0 + x1) / 2.0, (brl_y0 + brl_y1) / 2.0)
-    else:
-        brl_out = braille_circles
+    # Braille → bottom band (dynamic fitting matching Hebrew text band)
+    t_brl = _fit_transform([], braille_circles, x0, brl_y0, x1, brl_y1)
+    brl_out = _xform_circles(braille_circles, *t_brl) if t_brl else braille_circles
 
     # Image (closed + open) → middle band, one shared transform to keep it registered
     t_img = _fit_transform(image_closed_paths + image_open_paths, [], x0, img_y0, x1, img_y1)
@@ -482,16 +474,15 @@ def create_dome(cx: float, cy: float, base_radius: float, height: float) -> cq.W
 
 def add_braille_domes(circles: List[CircleDef]) -> List:
     """
-    Build Braille domes using fixed Grade 1 dimensions from config
-    (braille_dot_radius_mm, braille_dot_height_mm), ignoring the detected radius
-    from the DXF so all dots are standardised.
+    Build Braille domes using dynamically scaled radius and height from layout.
     """
-    print(f"  Braille domes: {len(circles)} circles  "
-          f"r={BRAILLE_FIXED_RADIUS}mm  h={BRAILLE_FIXED_HEIGHT}mm")
+    print(f"  Braille domes: {len(circles)} circles")
     solids = []
-    for i, ((cx, cy), _) in enumerate(circles, 1):
+    for i, ((cx, cy), r) in enumerate(circles, 1):
         try:
-            solids.append(create_dome(cx, cy, BRAILLE_FIXED_RADIUS, BRAILLE_FIXED_HEIGHT).val())
+            dot_r = r if r > 0 else BRAILLE_FIXED_RADIUS
+            dot_h = max(0.4, dot_r * (BRAILLE_FIXED_HEIGHT / BRAILLE_FIXED_RADIUS))
+            solids.append(create_dome(cx, cy, dot_r, dot_h).val())
         except Exception as e:
             print(f"    Warning: dome {i} skipped: {e}")
     return solids
