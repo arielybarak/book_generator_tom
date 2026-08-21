@@ -25,8 +25,11 @@ tactile:
   image_outline_height_mm: 2.2      # main contours (tallest — primary shapes to trace)
   image_detail_height_mm: 0.0       # DISABLED — no inner details for ultra-simple shapes
   text_height_mm: 1.0               # raised Hebrew text (sighted adult reads aloud)
-  braille_dot_height_mm: 1.2        # Braille dome height above base
-  braille_dot_radius_mm: 1.5        # Braille dot radius
+  braille_dot_height_mm: 0.6        # Braille dome height above base (standard: 0.6mm)
+  braille_dot_radius_mm: 0.75       # Braille dot radius (standard diameter: 1.5mm)
+  braille_dot_spacing_mm: 2.5       # Center-to-center dot spacing in cell (standard: 2.5mm)
+  braille_cell_spacing_mm: 6.0      # Center-to-center cell spacing (standard: 6.0mm)
+  braille_line_spacing_mm: 10.0     # Line spacing for multi-line Braille (standard: 10.0mm)
 
   # Line widths — wider lines are easier to feel
   image_outline_width_mm: 1.8       # bolder strokes = simpler, less fragile

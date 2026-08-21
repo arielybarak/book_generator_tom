@@ -395,30 +395,75 @@ def generate_hebrew_text_dxf(hebrew_text, output_path):
 
 
 # ── Braille geometry (millimetres) ────────────────────────────────────────────────
-BRAILLE_DOT_SPACING_MM = 5.0
-BRAILLE_CELL_SPACING_MM = 12.0
-BRAILLE_DOT_RADIUS_MM = 1.5
+# Standard Marburg Medium / ADA / BANA Braille dimensions (in millimetres):
+# - Dot base diameter: 1.50 mm (radius = 0.75 mm)
+# - Dot height: 0.60 mm
+# - Dot spacing within cell: 2.50 mm (center-to-center)
+# - Cell spacing: 6.00 mm (center-to-center pitch)
+# - Line spacing: 10.00 mm (center-to-center pitch)
+BRAILLE_DOT_SPACING_MM = 2.5
+BRAILLE_CELL_SPACING_MM = 6.0
+BRAILLE_LINE_SPACING_MM = 10.0
+BRAILLE_DOT_RADIUS_MM = 0.75
 
 _BRAILLE_DOT_CELL = {0: (0, 0), 1: (0, 1), 2: (0, 2), 3: (1, 0), 4: (1, 1), 5: (1, 2)}
 
-def generate_braille_dxf_from_text(braille_text, output_path):
-    """Emit Braille dots as DXF circles at FIXED Grade-1 spacing (mm)."""
+def generate_braille_dxf_from_text(braille_text, output_path, max_line_width_mm=130.0):
+    """
+    Emit Braille dots as DXF circles at standard fixed spacing and dimensions (in mm).
+    Supports multi-line text and automatic wrapping when lines exceed max_line_width_mm.
+    """
     doc = ezdxf.new()
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
     dot = BRAILLE_DOT_SPACING_MM
 
-    for i, ch in enumerate(braille_text):
-        code = ord(ch) - 0x2800
-        if code < 0 or code > 0xFF:
-            continue
+    max_chars_per_line = max(1, int(max_line_width_mm // BRAILLE_CELL_SPACING_MM))
 
-        x0 = i * BRAILLE_CELL_SPACING_MM
-        for bit, (col, row) in _BRAILLE_DOT_CELL.items():
-            if code & (1 << bit):
-                cx = x0 + col * dot
-                cy = (2 - row) * dot
-                msp.add_circle(center=(cx, cy), radius=BRAILLE_DOT_RADIUS_MM, dxfattribs={'color': 7})
+    # Split by explicit newlines, then wrap long lines at word boundaries if needed
+    lines = []
+    for raw_line in str(braille_text).splitlines():
+        if not raw_line:
+            continue
+        words = raw_line.split(" ")
+        current_line = []
+        current_len = 0
+        for word in words:
+            word_len = len(word)
+            if current_len + (1 if current_len > 0 else 0) + word_len <= max_chars_per_line:
+                if current_len > 0:
+                    current_line.append(" ")
+                    current_len += 1
+                current_line.append(word)
+                current_len += word_len
+            else:
+                if current_line:
+                    lines.append("".join(current_line))
+                    current_line = [word]
+                    current_len = word_len
+                else:
+                    lines.append(word)
+                    current_line = []
+                    current_len = 0
+        if current_line:
+            lines.append("".join(current_line))
+
+    if not lines and braille_text:
+        lines = [braille_text]
+
+    for line_idx, line in enumerate(lines):
+        y0 = -line_idx * BRAILLE_LINE_SPACING_MM
+        for char_idx, ch in enumerate(line):
+            code = ord(ch) - 0x2800
+            if code < 0 or code > 0xFF:
+                continue
+
+            x0 = char_idx * BRAILLE_CELL_SPACING_MM
+            for bit, (col, row) in _BRAILLE_DOT_CELL.items():
+                if code & (1 << bit):
+                    cx = x0 + col * dot
+                    cy = y0 + (2 - row) * dot
+                    msp.add_circle(center=(cx, cy), radius=BRAILLE_DOT_RADIUS_MM, dxfattribs={'color': 7})
 
     doc.saveas(output_path)
 

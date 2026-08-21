@@ -11,6 +11,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from diffusers import AutoPipelineForText2Image
 
+from pathlib import Path
+
 from src import language_funcs as lf
 from src import image_funcs as imf
 from src.config import cfg
@@ -173,7 +175,7 @@ def create_images(
     plt.savefig(text_output_location, dpi=250, bbox_inches="tight", pad_inches=0)
     plt.close()
 
-    # שמירת ברייל PNG
+    # שמירת ברייל PNG וקובץ טקסט ברייל
     plt.figure(figsize=(5, 5))
     plt.gca().set_facecolor("white")
     plt.text(
@@ -185,6 +187,10 @@ def create_images(
     plt.savefig(braille_output_location, dpi=300, bbox_inches="tight", pad_inches=0)
     plt.close()
 
+    try:
+        Path(braille_output_location).with_suffix(".txt").write_text(braille, encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: could not write braille text file: {e}")
 
 
 def images_to_dxf(image_location, text_location, braille_location):
@@ -193,7 +199,17 @@ def images_to_dxf(image_location, text_location, braille_location):
     dxf_image = str(image_location).replace('.png', '.dxf')
 
     imf.png_to_dxf(text_location, dxf_text)
-    imf.png_to_dxf(braille_location, dxf_braille)
+
+    braille_txt_path = Path(braille_location).with_suffix(".txt")
+    if braille_txt_path.exists():
+        try:
+            braille_str = braille_txt_path.read_text(encoding="utf-8")
+            imf.generate_braille_dxf_from_text(braille_str, dxf_braille)
+        except Exception:
+            imf.png_to_dxf(braille_location, dxf_braille)
+    else:
+        imf.png_to_dxf(braille_location, dxf_braille)
+
     imf.create_smooth_dxf_from_png(
         image_location,
         dxf_image,
@@ -202,6 +218,5 @@ def images_to_dxf(image_location, text_location, braille_location):
         smoothing=0.5,
         margin_ratio=0.22
     )
-
 
     return dxf_image, dxf_text, dxf_braille
