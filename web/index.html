@@ -39,6 +39,31 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Stale-build self-heal — runs BEFORE the app bundle so it can catch the
+      // bundle itself failing to load. A cached index.html can point at a build
+      // hash that no longer exists after a deploy; the module script then 404s and
+      // the page renders blank ("can't enter the site"). Reload once to pull the
+      // fresh index.html. Guarded by sessionStorage (same key as lib/reload.js) so
+      // a genuinely-broken build can never loop-reload.
+      ;(function () {
+        window.addEventListener(
+          'error',
+          function (e) {
+            var el = e && e.target
+            if (!el || el.tagName !== 'SCRIPT' || el.type !== 'module') return
+            try {
+              if (sessionStorage.getItem('tom_stale_reload')) return
+              sessionStorage.setItem('tom_stale_reload', '1')
+            } catch (_) {
+              return
+            }
+            location.reload()
+          },
+          true, // capture: resource-load error events don't bubble
+        )
+      })()
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
