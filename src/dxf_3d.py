@@ -29,12 +29,11 @@ import math
 import time
 from pathlib import Path
 from typing import List, Tuple
-
+import math
+import cadquery as cq
 import ezdxf
 from ezdxf.entities import LWPolyline, Circle, Ellipse, Spline, Polyline, Line
 from ezdxf.path import make_path
-
-import cadquery as cq
 import pyclipper
 
 from src.config import cfg
@@ -512,7 +511,7 @@ def clipper_clean_and_simplify(poly: List[Point], clean_tol_mm: float) -> List[L
     return [[(x / SCALE, y / SCALE) for x, y in p] for p in simplified]
 
 
-def stroke_polygons_from_centerline(points: List[Point], half_width: float, closed: bool) -> List[List[Point]]:
+def stroke_polygons_from_centerline_old(points: List[Point], half_width: float, closed: bool) -> List[List[Point]]:
     """
     Offset a centerline to produce stroke footprint polygons.
 
@@ -539,6 +538,107 @@ def stroke_polygons_from_centerline(points: List[Point], half_width: float, clos
     outs = pco.Execute(half_width * SCALE)
     return [[(x / SCALE, y / SCALE) for x, y in poly] for poly in outs] if outs else []
 
+def stroke_polygons_from_centerline(
+    points: List[Point],
+    half_width: float,
+    closed: bool
+) -> List[List[Point]]:
+    """
+    Convert a CENTERLINE into stroke footprint polygons.
+
+    OPEN PATH:
+        creates a normal rounded stroke.
+
+    CLOSED PATH:
+        this function is only used for fallback/simple cases.
+        Proper hollow closed contours are handled separately by
+        _extrude_closed_contour().
+    """
+    if len(points) < 2 or half_width <= 0:
+        return []
+
+    pts = clean_polyline_points(points, POINT_CLEAN_TOL)
+
+    if len(pts) < 2:
+        return []
+
+    if closed and len(pts) > 2 and pts[0] == pts[-1]:
+        pts = pts[:-1]
+
+    scaled = [
+        (int(round(x * SCALE)), int(round(y * SCALE)))
+        for x, y in pts
+    ]
+
+    pco = pyclipper.PyclipperOffset()
+
+    if closed:
+        pco.AddPath(
+            scaled,
+            pyclipper.JT_ROUND,
+            pyclipper.ET_CLOSEDLINE,
+        )
+    else:
+        pco.AddPath(
+            scaled,
+            pyclipper.JT_ROUND,
+            pyclipper.ET_OPENROUND,
+        )
+
+    result = pco.Execute(half_width * SCALE)
+
+    return [
+        [(x / SCALE, y / SCALE) for x, y in poly]
+        for poly in result
+        if len(poly) >= 3
+    ]
+
+def _offset_closed_polygon(
+    pts: List[Point],
+    distance: float,
+) -> List[List[Point]]:
+    """
+    Offset a CLOSED polygon by `distance`.
+
+    positive distance -> outward
+    negative distance -> inward
+    """
+    if len(pts) < 3:
+        return []
+
+    pts = clean_polyline_points(pts, POINT_CLEAN_TOL)
+
+    if len(pts) < 3:
+        return []
+
+    # Remove duplicate last point if present
+    if pts[0] == pts[-1]:
+        pts = pts[:-1]
+
+    # pyclipper behaves most predictably with positive orientation
+    if polygon_area(pts) < 0:
+        pts = list(reversed(pts))
+
+    scaled = [
+        (int(round(x * SCALE)), int(round(y * SCALE)))
+        for x, y in pts
+    ]
+
+    pco = pyclipper.PyclipperOffset()
+
+    pco.AddPath(
+        scaled,
+        pyclipper.JT_ROUND,
+        pyclipper.ET_CLOSEDPOLYGON,
+    )
+
+    result = pco.Execute(distance * SCALE)
+
+    return [
+        [(x / SCALE, y / SCALE) for x, y in poly]
+        for poly in result
+        if len(poly) >= 3
+    ]
 
 def _extrude_segments_fallback(
     solids: List,
@@ -579,8 +679,157 @@ def _extrude_open_centerline(
             except Exception as e:
                 print(f"    Warning: open image stroke {idx} polygon skipped: {e}")
 
-
 def _extrude_closed_contour(
+    solids: List,
+    pts: List[Point],
+    half_width: float,
+    stroke_height: float,
+    idx: int,
+    round_top: bool = False,
+) -> None:
+    """
+    Create a RAISED HOLLOW CONTOUR from a closed path.
+
+    Only a narrow ridge around the original path is raised.
+
+    The interior remains at exactly BASE_THICKNESS,
+    i.e. completely flat with the background.
+
+             raised ridge
+             ↓       ↓
+        _____|       |_____
+    ___/                   \\___   <- base plate
+
+       interior stays flat
+    """
+
+    if half_width <= 0 or stroke_height <= 0:
+        return
+
+    pts = clean_polyline_points(pts, POINT_CLEAN_TOL)
+
+    if len(pts) < 3:
+        return
+
+    if pts[0] == pts[-1]:
+        pts = pts[:-1]
+
+    if len(pts) < 3:
+        return
+
+    # Normalize orientation.
+    if polygon_area(pts) < 0:
+        pts = list(reversed(pts))
+
+    # ---------------------------------------------------------
+    # Original contour:
+    #
+    #             P
+    #       ----------------
+    #
+    # We make:
+    #
+    #     outer = P offset by +half_width
+    #     inner = P offset by -half_width
+    #
+    # Raised geometry = OUTER - INNER
+    #
+    # ---------------------------------------------------------
+
+    outer_polys = _offset_closed_polygon(
+        pts,
+        +half_width,
+    )
+
+    inner_polys = _offset_closed_polygon(
+        pts,
+        -half_width,
+    )
+
+    if not outer_polys:
+        print(
+            f"    Warning: closed image stroke {idx}: "
+            f"could not create outer offset"
+        )
+        return
+
+    # Usually there is one outer polygon.
+    # Multiple polygons are supported for robustness.
+    for outer in outer_polys:
+
+        outer = clean_polyline_points(
+            outer,
+            POINT_CLEAN_TOL,
+        )
+
+        if len(outer) < 3:
+            continue
+
+        if polygon_area(outer) < 0:
+            outer = list(reversed(outer))
+
+        try:
+            # Raise the complete OUTER region.
+            outer_solid = _capped_solid(
+                outer,
+                stroke_height,
+                round_top=round_top,
+            )
+
+            ring = cq.Workplane("XY").add(outer_solid)
+
+            # -------------------------------------------------
+            # Remove the middle.
+            #
+            # Start the cutter below the plate top so there is
+            # absolutely no residual raised material inside.
+            # -------------------------------------------------
+
+            for inner in inner_polys:
+
+                inner = clean_polyline_points(
+                    inner,
+                    POINT_CLEAN_TOL,
+                )
+
+                if len(inner) < 3:
+                    continue
+
+                if polygon_area(inner) < 0:
+                    inner = list(reversed(inner))
+
+                cutter = (
+                    cq.Workplane("XY")
+                    .workplane(offset=BASE_THICKNESS - 0.05)
+                    .polyline(inner)
+                    .close()
+                    .extrude(stroke_height + 0.10)
+                )
+
+                ring = ring.cut(cutter)
+
+            solids.append(ring.val())
+
+        except Exception as e:
+
+            print(
+                f"    Warning: hollow closed stroke {idx} failed "
+                f"({e}); using per-segment fallback"
+            )
+
+            # Very robust fallback:
+            # draw every edge independently as a raised line.
+            # This CANNOT fill the center.
+            _extrude_segments_fallback(
+                solids,
+                pts,
+                half_width,
+                stroke_height,
+                idx,
+                round_top,
+            )
+
+def _extrude_closed_contour_old(
     solids: List,
     pts: List[Point],
     half_width: float,
