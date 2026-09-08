@@ -16,7 +16,7 @@ CLI: python src/dxf_3d.py --text text.dxf --braille braille.dxf --image image.dx
 All geometry constants live in config.yaml under the `tactile` section.
 
 Implementation notes:
-  - Closed image paths are stroked edge-by-edge with ET_OPENROUND to avoid filled-band artifacts.
+  - Closed image paths are extruded as hollow raised contour lines; interiors remain flat at base plate height.
   - Dome cross-section is approximated by filleting the top edges of each extruded ridge.
   - Douglas-Peucker simplification is applied to every path before extrusion to remove
     micro-jaggedness from rasterised contours.
@@ -516,11 +516,10 @@ def stroke_polygons_from_centerline(points: List[Point], half_width: float, clos
     """
     Offset a centerline to produce stroke footprint polygons.
 
-    Both open and closed paths use ET_OPENROUND on a single polyline.
-    For closed paths the first point is appended so the polyline forms a
-    complete loop — this produces a continuous ring with no inter-segment
-    gaps, while still avoiding the filled-band artefact that
-    ET_CLOSEDLINE / ET_CLOSEDPOLYGON would cause.
+    For closed paths, ET_CLOSEDLINE is used to offset both sides of the closed
+    loop, returning outer contour boundary polygons (positive area) and inner hole
+    polygons (negative area).
+    For open paths, ET_OPENROUND is used with rounded end caps.
     """
     if len(points) < 2:
         return []
@@ -528,14 +527,120 @@ def stroke_polygons_from_centerline(points: List[Point], half_width: float, clos
     if len(pts) < 2:
         return []
 
-    if closed and pts[0] != pts[-1]:
-        pts = pts + [pts[0]]          # close the loop as an open polyline
+    if closed and len(pts) > 2 and pts[0] == pts[-1]:
+        pts = pts[:-1]
 
     scaled = [(int(x * SCALE), int(y * SCALE)) for x, y in pts]
     pco = pyclipper.PyclipperOffset()
-    pco.AddPath(scaled, pyclipper.JT_ROUND, pyclipper.ET_OPENROUND)
+    if closed:
+        pco.AddPath(scaled, pyclipper.JT_ROUND, pyclipper.ET_CLOSEDLINE)
+    else:
+        pco.AddPath(scaled, pyclipper.JT_ROUND, pyclipper.ET_OPENROUND)
     outs = pco.Execute(half_width * SCALE)
     return [[(x / SCALE, y / SCALE) for x, y in poly] for poly in outs] if outs else []
+
+
+def _extrude_segments_fallback(
+    solids: List,
+    pts: List[Point],
+    half_width: float,
+    stroke_height: float,
+    idx: int,
+    round_top: bool = False,
+) -> None:
+    """Fallback: stroke each edge segment individually so the interior is never filled."""
+    n = len(pts)
+    for i in range(n):
+        p1, p2 = pts[i], pts[(i + 1) % n]
+        if p1 == p2:
+            continue
+        _extrude_open_centerline(solids, [p1, p2], half_width, stroke_height, idx, round_top)
+
+
+def _extrude_open_centerline(
+    solids: List,
+    pts: List[Point],
+    half_width: float,
+    stroke_height: float,
+    idx: int,
+    round_top: bool = False,
+) -> None:
+    """Simplify, stroke, and extrude an open centerline path as a ridge solid."""
+    stroke_polys = stroke_polygons_from_centerline(pts, half_width, closed=False)
+    for poly in stroke_polys:
+        for p2 in clipper_clean_and_simplify(poly, CLIPPER_CLEAN_TOL):
+            p2 = clean_polyline_points(p2, POINT_CLEAN_TOL)
+            if len(p2) < 3:
+                continue
+            if polygon_area(p2) < 0:
+                p2 = list(reversed(p2))
+            try:
+                solids.append(_capped_solid(p2, stroke_height, round_top=round_top))
+            except Exception as e:
+                print(f"    Warning: open image stroke {idx} polygon skipped: {e}")
+
+
+def _extrude_closed_contour(
+    solids: List,
+    pts: List[Point],
+    half_width: float,
+    stroke_height: float,
+    idx: int,
+    round_top: bool = False,
+) -> None:
+    """
+    Extrude a closed path as a raised contour line (outline).
+    The outer boundary is extruded to `stroke_height`, and the interior
+    is cut away down to base plate height, leaving the interior completely flat.
+    """
+    stroke_polys = stroke_polygons_from_centerline(pts, half_width, closed=True)
+    outers: List[List[Point]] = []
+    inners: List[List[Point]] = []
+
+    for poly in stroke_polys:
+        for p2 in clipper_clean_and_simplify(poly, CLIPPER_CLEAN_TOL):
+            p2 = clean_polyline_points(p2, POINT_CLEAN_TOL)
+            if len(p2) < 3:
+                continue
+            if polygon_area(p2) > 0:
+                outers.append(p2)
+            else:
+                inners.append(list(reversed(p2)))
+
+    if not outers:
+        return
+
+    # If no inner holes exist (e.g. tiny shape smaller than stroke width), extrude outer directly
+    if not inners:
+        for out_poly in outers:
+            try:
+                solids.append(_capped_solid(out_poly, stroke_height, round_top=round_top))
+            except Exception as e:
+                print(f"    Warning: closed stroke {idx} outer solid skipped: {e}")
+        return
+
+    # Extrude hollow contour by subtracting inner hole prisms from the outer solid
+    for out_poly in outers:
+        try:
+            out_solid = _capped_solid(out_poly, stroke_height, round_top=round_top)
+            work = cq.Workplane("XY").add(out_solid)
+            for in_poly in inners:
+                in_poly_clean = clean_polyline_points(in_poly, POINT_CLEAN_TOL)
+                if len(in_poly_clean) < 3:
+                    continue
+                if polygon_area(in_poly_clean) < 0:
+                    in_poly_clean = list(reversed(in_poly_clean))
+                cut_prism = (
+                    cq.Workplane("XY")
+                    .workplane(offset=BASE_THICKNESS - 0.5)
+                    .polyline(in_poly_clean).close()
+                    .extrude(stroke_height + 1.0)
+                )
+                work = work.cut(cut_prism)
+            solids.append(work.val())
+        except Exception as e:
+            print(f"    Warning: boolean cut failed for closed stroke {idx} ({e}), falling back to segment stroking")
+            _extrude_segments_fallback(solids, pts, half_width, stroke_height, idx, round_top)
 
 
 def _extrude_one_centerline(
@@ -548,27 +653,18 @@ def _extrude_one_centerline(
     round_top: bool = False,
 ) -> None:
     """
-    Simplify, stroke, and extrude one centerline path as a ridge, appending the
-    resulting solids to `solids`. `round_top` applies a draft taper (only worth it
-    for wide outlines; thin details stay flat — see _capped_solid).
+    Simplify, stroke, and extrude one centerline path.
+    Closed paths are extruded as raised contour lines with completely flat interiors.
+    Open paths are extruded as solid ridges.
     """
     pts = rdp_simplify(clean_polyline_points(pts, POINT_CLEAN_TOL), PATH_SIMPLIFY_TOL)
     if len(pts) < 2:
         return
 
-    stroke_polys = stroke_polygons_from_centerline(pts, half_width, is_closed)
-
-    for poly in stroke_polys:
-        for p2 in clipper_clean_and_simplify(poly, CLIPPER_CLEAN_TOL):
-            p2 = clean_polyline_points(p2, POINT_CLEAN_TOL)
-            if len(p2) < 3:
-                continue
-            if polygon_area(p2) < 0:
-                p2 = list(reversed(p2))
-            try:
-                solids.append(_capped_solid(p2, stroke_height, round_top=round_top))
-            except Exception as e:
-                print(f"    Warning: image stroke {idx} polygon skipped: {e}")
+    if is_closed and len(pts) >= 3:
+        _extrude_closed_contour(solids, pts, half_width, stroke_height, idx, round_top=round_top)
+    else:
+        _extrude_open_centerline(solids, pts, half_width, stroke_height, idx, round_top=round_top)
 
 
 def extrude_image_strokes(
