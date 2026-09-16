@@ -8,7 +8,7 @@ ezdxf
 cadquery
 pyclipper
 gradio==6.3.0
-sentencepiece
+deep-translator
 numpy
 matplotlib
 pyyaml
