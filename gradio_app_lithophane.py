@@ -82,6 +82,14 @@ def predownload_weights():
         print(f"Model weights cached in {time.time() - t0:.0f}s.", flush=True)
     except Exception as e:
         print(f"Model pre-download skipped ({e}); will load lazily on first request.", flush=True)
+    # Start the translation helper process now, so the first request doesn't pay
+    # the model download + load. (The model never loads in this process.)
+    try:
+        t0 = time.time()
+        hebrew_translator("תפוח")
+        print(f"Translation helper ready in {time.time() - t0:.0f}s.", flush=True)
+    except Exception as e:
+        print(f"Translation helper warm-up failed ({e}); will retry on first request.", flush=True)
 
 
 def get_pipeline():
