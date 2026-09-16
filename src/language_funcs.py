@@ -3,14 +3,20 @@ Hebrew and Braille language utilities.
 
 Responsibilities:
 - HEBREW_MAP / SPECIAL_REPLACEMENTS / DISPLAY_MAPPING: character-level constants
-- hebrew_translator(): Hebrew → English via a local MarianMT model (CPU)
+- hebrew_translator(): Hebrew → English via a local MarianMT model in a helper process
 - convert_to_braille(): Hebrew string → Unicode Braille string
 - apply_variations(): apply user-selected nikud (vowel marks) to a Hebrew string
 - check_ambiguities(): find ambiguous characters in a string (feeds Gradio dropdowns)
 - add_nikud(): interactive CLI version of nikud disambiguation (uses input())
 """
-from functools import cache, lru_cache
+import json
+import os
 import re
+import select
+import subprocess
+import sys
+import threading
+from functools import lru_cache
 
 # ── Nikud / vowel-mark Unicode constants ──────────────────────────────────────
 DAGESH   = 'ּ'
@@ -66,29 +72,41 @@ DISPLAY_MAPPING = {
 
 # ── Translation ────────────────────────────────────────────────────────────────
 # Local model instead of Google Translate (Google IP-blocks the HF Space).
-# CPU only: on ZeroGPU, CUDA must not be touched outside @spaces.GPU functions.
+# The model runs in a separate helper process (this file, run as a script): loading
+# torch/transformers in the ZeroGPU main process poisons its CUDA state, and every
+# GPU worker forked from it then fails with "No CUDA GPUs are available".
 TRANSLATION_MODEL = "Helsinki-NLP/opus-mt-tc-big-he-en"
+HELPER_TIMEOUT_S = 180  # first reply includes model download + load
 HEBREW_RE = re.compile(r"[֐-׿]")
 NIKUD_RE = re.compile(r"[֑-ׇ]")  # model is trained on unpointed text
 
-
-@cache
-def load_translation_model():
-    """Load tokenizer + model once (the app warms this at startup)."""
-    from transformers import MarianMTModel, MarianTokenizer
-    return (
-        MarianTokenizer.from_pretrained(TRANSLATION_MODEL),
-        MarianMTModel.from_pretrained(TRANSLATION_MODEL),  # CPU + eval mode by default
-    )
+_helper = None
+_helper_lock = threading.Lock()
 
 
 @lru_cache(maxsize=256)
 def _translate_he_en(text):
-    tokenizer, model = load_translation_model()
-    inputs = tokenizer([text], return_tensors="pt")
-    output = model.generate(**inputs, max_length=64)
-    # "Little dog." → "Little dog" (the result is spliced mid-sentence into the SD prompt)
-    return tokenizer.decode(output[0], skip_special_tokens=True).strip().rstrip(".")
+    """Send one text to the helper process and return its English translation."""
+    global _helper
+    with _helper_lock:
+        if _helper is None or _helper.poll() is not None:
+            _helper = subprocess.Popen(
+                [sys.executable, "-u", __file__],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
+            )
+        _helper.stdin.write(json.dumps(text) + "\n")
+        _helper.stdin.flush()
+        ready, _, _ = select.select([_helper.stdout], [], [], HELPER_TIMEOUT_S)
+        line = _helper.stdout.readline() if ready else ""
+        if not line:
+            _helper.kill()
+            _helper = None
+            raise RuntimeError("Translation helper died or timed out")
+    reply = json.loads(line)
+    if "error" in reply:
+        raise RuntimeError(f"Translation failed: {reply['error']}")
+    return reply["ok"]
 
 
 def hebrew_translator(user_prompt):
@@ -101,6 +119,23 @@ def hebrew_translator(user_prompt):
     if not translation or HEBREW_RE.search(translation):
         raise RuntimeError(f"Could not translate picture description to English: {user_prompt!r}")
     return translation
+
+
+def _serve_translations():
+    """Helper-process loop: one JSON string per stdin line → one JSON reply per stdout line."""
+    out, sys.stdout = sys.stdout, sys.stderr  # library chatter must not reach the reply pipe
+    from transformers import MarianMTModel, MarianTokenizer
+    tokenizer = MarianTokenizer.from_pretrained(TRANSLATION_MODEL)
+    model = MarianMTModel.from_pretrained(TRANSLATION_MODEL)
+    for line in sys.stdin:
+        try:
+            ids = model.generate(**tokenizer([json.loads(line)], return_tensors="pt"), max_length=64)
+            # "Little dog." → "Little dog" (spliced mid-sentence into the SD prompt)
+            reply = {"ok": tokenizer.decode(ids[0], skip_special_tokens=True).strip().rstrip(".")}
+        except Exception as e:
+            reply = {"error": repr(e)}
+        out.write(json.dumps(reply) + "\n")
+        out.flush()
 
 
 # ── Nikud (CLI only) ──────────────────────────────────────────────────────────
@@ -237,3 +272,8 @@ def english_to_braille(text):
 def text_to_braille(text, language='hebrew'):
     """Language-aware Braille: Hebrew (RTL→reversed) or English (Grade-1, LTR)."""
     return english_to_braille(text) if language == 'english' else convert_to_braille(text)
+
+
+if __name__ == "__main__":
+    sys.path.pop(0)  # drop src/ so its modules (config.py, …) can't shadow library imports
+    _serve_translations()
