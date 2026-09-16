@@ -3,13 +3,13 @@ Hebrew and Braille language utilities.
 
 Responsibilities:
 - HEBREW_MAP / SPECIAL_REPLACEMENTS / DISPLAY_MAPPING: character-level constants
-- hebrew_translator(): Google Translate Hebrew → English
+- hebrew_translator(): Hebrew → English via a local MarianMT model (CPU)
 - convert_to_braille(): Hebrew string → Unicode Braille string
 - apply_variations(): apply user-selected nikud (vowel marks) to a Hebrew string
 - check_ambiguities(): find ambiguous characters in a string (feeds Gradio dropdowns)
 - add_nikud(): interactive CLI version of nikud disambiguation (uses input())
 """
-from deep_translator import GoogleTranslator
+from functools import cache, lru_cache
 import re
 
 # ── Nikud / vowel-mark Unicode constants ──────────────────────────────────────
@@ -65,19 +65,42 @@ DISPLAY_MAPPING = {
 
 
 # ── Translation ────────────────────────────────────────────────────────────────
+# Local model instead of Google Translate (Google IP-blocks the HF Space).
+# CPU only: on ZeroGPU, CUDA must not be touched outside @spaces.GPU functions.
+TRANSLATION_MODEL = "Helsinki-NLP/opus-mt-tc-big-he-en"
+HEBREW_RE = re.compile(r"[֐-׿]")
+NIKUD_RE = re.compile(r"[֑-ׇ]")  # model is trained on unpointed text
+
+
+@cache
+def load_translation_model():
+    """Load tokenizer + model once (the app warms this at startup)."""
+    from transformers import MarianMTModel, MarianTokenizer
+    return (
+        MarianTokenizer.from_pretrained(TRANSLATION_MODEL),
+        MarianMTModel.from_pretrained(TRANSLATION_MODEL),  # CPU + eval mode by default
+    )
+
+
+@lru_cache(maxsize=256)
+def _translate_he_en(text):
+    tokenizer, model = load_translation_model()
+    inputs = tokenizer([text], return_tensors="pt")
+    output = model.generate(**inputs, max_length=64)
+    # "Little dog." → "Little dog" (the result is spliced mid-sentence into the SD prompt)
+    return tokenizer.decode(output[0], skip_special_tokens=True).strip().rstrip(".")
+
 
 def hebrew_translator(user_prompt):
-    """Translate Hebrew → English; pass through if already English."""
+    """Translate Hebrew → English; pass through if already English. Raises on failure."""
     if not user_prompt:
         return ""
-    contains_hebrew = re.search(r"[֐-׿]", user_prompt) is not None
-    if contains_hebrew:
-        try:
-            return GoogleTranslator(source='auto', target='en').translate(user_prompt)
-        except Exception as e:
-            print(f"Translation error: {e}")
-            return user_prompt
-    return user_prompt
+    if not HEBREW_RE.search(user_prompt):
+        return user_prompt
+    translation = _translate_he_en(NIKUD_RE.sub("", user_prompt).strip())
+    if not translation or HEBREW_RE.search(translation):
+        raise RuntimeError(f"Could not translate picture description to English: {user_prompt!r}")
+    return translation
 
 
 # ── Nikud (CLI only) ──────────────────────────────────────────────────────────

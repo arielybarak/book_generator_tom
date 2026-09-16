@@ -45,6 +45,7 @@ from diffusers import AutoPipelineForText2Image
 from src.language_funcs import (
     DISPLAY_MAPPING,
     hebrew_translator,
+    load_translation_model,
     text_to_braille,
     apply_variations,
     check_ambiguities,
@@ -82,6 +83,14 @@ def predownload_weights():
         print(f"Model weights cached in {time.time() - t0:.0f}s.", flush=True)
     except Exception as e:
         print(f"Model pre-download skipped ({e}); will load lazily on first request.", flush=True)
+    # Hebrew→English translator (CPU): load now so the first request doesn't pay
+    # the ~500MB download + load inside a web call.
+    try:
+        t0 = time.time()
+        load_translation_model()
+        print(f"Translation model ready in {time.time() - t0:.0f}s.", flush=True)
+    except Exception as e:
+        print(f"Translation model preload skipped ({e}); will load on first request.", flush=True)
 
 
 def get_pipeline():
