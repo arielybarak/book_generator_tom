@@ -16,7 +16,7 @@ CLI: python src/dxf_3d.py --text text.dxf --braille braille.dxf --image image.dx
 All geometry constants live in config.yaml under the `tactile` section.
 
 Implementation notes:
-  - Closed image paths are extruded as hollow raised contour lines; interiors remain flat at base plate height.
+  - Closed image paths are stroked edge-by-edge with ET_OPENROUND to avoid filled-band artifacts.
   - Dome cross-section is approximated by filleting the top edges of each extruded ridge.
   - Douglas-Peucker simplification is applied to every path before extrusion to remove
     micro-jaggedness from rasterised contours.
@@ -29,11 +29,12 @@ import math
 import time
 from pathlib import Path
 from typing import List, Tuple
-import math
-import cadquery as cq
+
 import ezdxf
 from ezdxf.entities import LWPolyline, Circle, Ellipse, Spline, Polyline, Line
 from ezdxf.path import make_path
+
+import cadquery as cq
 import pyclipper
 
 from src.config import cfg
@@ -70,6 +71,7 @@ IMAGE_OUTLINE_WIDTH   = _t["image_outline_width_mm"]
 IMAGE_DETAIL_HEIGHT   = _t["image_detail_height_mm"]
 IMAGE_DETAIL_WIDTH    = _t["image_detail_width_mm"]
 OUTLINE_MIN_AREA      = _t["outline_min_closed_area_mm2"]
+FILL_HEIGHT           = _t["fill_height_mm"]
 
 TEXT_SOLID_HEIGHT     = _t["text_height_mm"]
 
@@ -103,6 +105,12 @@ MOUNTING_HOLE_SPACING      = cfg["mounting_holes"]["spacing_mm"]
 # Aliases used as CLI defaults
 IMAGE_STROKE_WIDTH  = IMAGE_OUTLINE_WIDTH
 IMAGE_STROKE_HEIGHT = IMAGE_OUTLINE_HEIGHT
+
+# `extrude(taper=…)` SEGFAULTS inside OCCT on real Hebrew glyph outlines — a C-level
+# crash that kills the whole worker. Dome tops are achieved instead via safe_fillet_top
+# (post-extrude top-edge fillet). Raise STROKE_TAPER_DEG > 0 only with a crash-isolated
+# subprocess extrude.
+STROKE_TAPER_DEG = 0.0
 
 
 # =========================
@@ -244,24 +252,17 @@ def layout_content_on_base(
     t_txt = _fit_transform(text_shapes, [], x0, txt_y0, x1, txt_y1)
     text_out = _xform_paths(text_shapes, *t_txt) if t_txt else text_shapes
 
-    # Braille → bottom band (fixed standard 1:1 scale, centered in bottom band)
-    if braille_circles:
-        bx0, by0, bx1, by1 = bbox_of_paths([], braille_circles)
-        bw, bh = bx1 - bx0, by1 - by0
-        if bw > 0 and bh > 0:
-            if bw > (x1 - x0) * 1.5:
-                # Oversized legacy DXF fallback
-                t_brl = _fit_transform([], braille_circles, x0, brl_y0, x1, brl_y1)
-                brl_out = _xform_circles(braille_circles, *t_brl) if t_brl else braille_circles
-            else:
-                # Standard 1:1 mm layout: center within the braille band
-                dx = ((x0 + x1) / 2.0) - ((bx0 + bx1) / 2.0)
-                dy = ((brl_y0 + brl_y1) / 2.0) - ((by0 + by1) / 2.0)
-                brl_out = translate_circles(braille_circles, dx, dy)
-        else:
-            brl_out = braille_circles
+    # Braille → bottom band at its NATIVE Grade-1 size (it is generated at fixed mm
+    # spacing). Do NOT stretch it to fill the band — that would blow up the dot gaps for
+    # short words. Centre it; only shrink if a long word would overflow the plate width.
+    bx0, by0, bx1, by1 = bbox_of_paths([], braille_circles)
+    bw, bh = bx1 - bx0, by1 - by0
+    if bw > 0 and bh > 0:
+        s_brl = min(1.0, (x1 - x0) / bw, (brl_y1 - brl_y0) / bh)
+        brl_out = _xform_circles(braille_circles, s_brl, (bx0 + bx1) / 2.0, (by0 + by1) / 2.0,
+                                 (x0 + x1) / 2.0, (brl_y0 + brl_y1) / 2.0)
     else:
-        brl_out = []
+        brl_out = braille_circles
 
     # Image (closed + open) → middle band, one shared transform to keep it registered
     t_img = _fit_transform(image_closed_paths + image_open_paths, [], x0, img_y0, x1, img_y1)
@@ -418,29 +419,14 @@ def create_base_plate() -> cq.Workplane:
     return base
 
 
-# Ridge tops are FLAT. We tried a draft taper for rounded, finger-friendly tops, but
-# `extrude(taper=…)` SEGFAULTS inside OCCT on real Hebrew glyph outlines (reproduced on
-# פרח) — a C-level crash that kills the whole worker, no STL, hard to catch. A flat
-# extrude is robust and fast. STROKE_TAPER_DEG = 0 disables the taper path entirely;
-# raise it again only with a crash-isolated (subprocess) extrude.
-STROKE_TAPER_DEG = 0.0
-
-
 def _capped_solid(pts: List[Point], height: float, offset: float = None, round_top: bool = True):
     """
-    Extrude polygon `pts` to `height`, returning a cq.Solid. When `round_top` and
-    rounded tops are enabled, apply a draft taper so the ridge narrows toward the top
-    (finger-friendly, no sharp edge); fall back to a straight extrude if the taper
-    self-intersects.
+    Extrude polygon `pts` to `height`. When `round_top` is True, a top-edge fillet
+    (dome profile) is applied after extrusion for a finger-friendly tactile feel.
+    Falls back silently to a flat-top solid if CadQuery rejects the fillet.
 
-    Taper is only worth attempting on wider features (text, image outlines). Thin
-    detail strokes (~0.8mm) almost always self-intersect at the taper angle, so the
-    attempt is wasted work (it fails, then we extrude flat anyway) — pass
-    round_top=False for those to skip straight to the flat extrude.
-
-    A fresh Workplane is built for each attempt: a FAILED taper extrude still consumes
-    the pending wire, so reusing one Workplane would make the fallback raise
-    "No pending wires present" and the feature would be dropped entirely.
+    Pass round_top=False for thin detail strokes where the fillet adds cost without
+    perceptible tactile benefit.
     """
     z = BASE_THICKNESS if offset is None else offset
 
@@ -452,11 +438,15 @@ def _capped_solid(pts: List[Point], height: float, offset: float = None, round_t
             return _profile().extrude(height, taper=STROKE_TAPER_DEG).val()
         except Exception:
             pass
-    return _profile().extrude(height).val()
+
+    solid = _profile().extrude(height)
+    if round_top:
+        solid = safe_fillet_top(solid, height * EDGE_FILLET_RATIO)
+    return solid.val()
 
 
 def extrude_text_solids(shapes: List[List[Point]], height: float) -> List:
-    """Extrude closed text polygons as solid ridges with rounded (tapered) tops."""
+    """Extrude closed text polygons as solid ridges with dome-rounded top edges."""
     print(f"  Text solids: {len(shapes)} closed shapes")
     solids = []
     for i, pts in enumerate(shapes, 1):
@@ -488,15 +478,16 @@ def create_dome(cx: float, cy: float, base_radius: float, height: float) -> cq.W
 
 def add_braille_domes(circles: List[CircleDef]) -> List:
     """
-    Build Braille domes using standard fixed radius and height (Marburg Medium / ADA standard).
+    Build Braille domes using fixed Grade 1 dimensions from config
+    (braille_dot_radius_mm, braille_dot_height_mm), ignoring the detected radius
+    from the DXF so all dots are standardised.
     """
-    print(f"  Braille domes: {len(circles)} circles")
+    print(f"  Braille domes: {len(circles)} circles  "
+          f"r={BRAILLE_FIXED_RADIUS}mm  h={BRAILLE_FIXED_HEIGHT}mm")
     solids = []
-    for i, ((cx, cy), r) in enumerate(circles, 1):
+    for i, ((cx, cy), _) in enumerate(circles, 1):
         try:
-            dot_r = BRAILLE_FIXED_RADIUS
-            dot_h = BRAILLE_FIXED_HEIGHT
-            solids.append(create_dome(cx, cy, dot_r, dot_h).val())
+            solids.append(create_dome(cx, cy, BRAILLE_FIXED_RADIUS, BRAILLE_FIXED_HEIGHT).val())
         except Exception as e:
             print(f"    Warning: dome {i} skipped: {e}")
     return solids
@@ -511,14 +502,13 @@ def clipper_clean_and_simplify(poly: List[Point], clean_tol_mm: float) -> List[L
     return [[(x / SCALE, y / SCALE) for x, y in p] for p in simplified]
 
 
-def stroke_polygons_from_centerline_old(points: List[Point], half_width: float, closed: bool) -> List[List[Point]]:
+def stroke_polygons_from_centerline(points: List[Point], half_width: float, closed: bool) -> List[List[Point]]:
     """
     Offset a centerline to produce stroke footprint polygons.
 
-    For closed paths, ET_CLOSEDLINE is used to offset both sides of the closed
-    loop, returning outer contour boundary polygons (positive area) and inner hole
-    polygons (negative area).
-    For open paths, ET_OPENROUND is used with rounded end caps.
+    Open paths → single ET_OPENROUND offset.
+    Closed paths → stroke each edge segment individually as OPEN to avoid
+    filled-band artefacts from ET_CLOSEDLINE.
     """
     if len(points) < 2:
         return []
@@ -526,370 +516,27 @@ def stroke_polygons_from_centerline_old(points: List[Point], half_width: float, 
     if len(pts) < 2:
         return []
 
-    if closed and len(pts) > 2 and pts[0] == pts[-1]:
-        pts = pts[:-1]
+    if closed:
+        out: List[List[Point]] = []
+        n = len(pts)
+        for i in range(n):
+            p1, p2 = pts[i], pts[(i + 1) % n]
+            if p1 == p2:
+                continue
+            scaled = [(int(p1[0] * SCALE), int(p1[1] * SCALE)),
+                      (int(p2[0] * SCALE), int(p2[1] * SCALE))]
+            pco = pyclipper.PyclipperOffset()
+            pco.AddPath(scaled, pyclipper.JT_ROUND, pyclipper.ET_OPENROUND)
+            outs = pco.Execute(half_width * SCALE)
+            if outs:
+                out.extend([[(x / SCALE, y / SCALE) for x, y in poly] for poly in outs])
+        return out
 
     scaled = [(int(x * SCALE), int(y * SCALE)) for x, y in pts]
     pco = pyclipper.PyclipperOffset()
-    if closed:
-        pco.AddPath(scaled, pyclipper.JT_ROUND, pyclipper.ET_CLOSEDLINE)
-    else:
-        pco.AddPath(scaled, pyclipper.JT_ROUND, pyclipper.ET_OPENROUND)
+    pco.AddPath(scaled, pyclipper.JT_ROUND, pyclipper.ET_OPENROUND)
     outs = pco.Execute(half_width * SCALE)
     return [[(x / SCALE, y / SCALE) for x, y in poly] for poly in outs] if outs else []
-
-def stroke_polygons_from_centerline(
-    points: List[Point],
-    half_width: float,
-    closed: bool
-) -> List[List[Point]]:
-    """
-    Convert a CENTERLINE into stroke footprint polygons.
-
-    OPEN PATH:
-        creates a normal rounded stroke.
-
-    CLOSED PATH:
-        this function is only used for fallback/simple cases.
-        Proper hollow closed contours are handled separately by
-        _extrude_closed_contour().
-    """
-    if len(points) < 2 or half_width <= 0:
-        return []
-
-    pts = clean_polyline_points(points, POINT_CLEAN_TOL)
-
-    if len(pts) < 2:
-        return []
-
-    if closed and len(pts) > 2 and pts[0] == pts[-1]:
-        pts = pts[:-1]
-
-    scaled = [
-        (int(round(x * SCALE)), int(round(y * SCALE)))
-        for x, y in pts
-    ]
-
-    pco = pyclipper.PyclipperOffset()
-
-    if closed:
-        pco.AddPath(
-            scaled,
-            pyclipper.JT_ROUND,
-            pyclipper.ET_CLOSEDLINE,
-        )
-    else:
-        pco.AddPath(
-            scaled,
-            pyclipper.JT_ROUND,
-            pyclipper.ET_OPENROUND,
-        )
-
-    result = pco.Execute(half_width * SCALE)
-
-    return [
-        [(x / SCALE, y / SCALE) for x, y in poly]
-        for poly in result
-        if len(poly) >= 3
-    ]
-
-def _offset_closed_polygon(
-    pts: List[Point],
-    distance: float,
-) -> List[List[Point]]:
-    """
-    Offset a CLOSED polygon by `distance`.
-
-    positive distance -> outward
-    negative distance -> inward
-    """
-    if len(pts) < 3:
-        return []
-
-    pts = clean_polyline_points(pts, POINT_CLEAN_TOL)
-
-    if len(pts) < 3:
-        return []
-
-    # Remove duplicate last point if present
-    if pts[0] == pts[-1]:
-        pts = pts[:-1]
-
-    # pyclipper behaves most predictably with positive orientation
-    if polygon_area(pts) < 0:
-        pts = list(reversed(pts))
-
-    scaled = [
-        (int(round(x * SCALE)), int(round(y * SCALE)))
-        for x, y in pts
-    ]
-
-    pco = pyclipper.PyclipperOffset()
-
-    pco.AddPath(
-        scaled,
-        pyclipper.JT_ROUND,
-        pyclipper.ET_CLOSEDPOLYGON,
-    )
-
-    result = pco.Execute(distance * SCALE)
-
-    return [
-        [(x / SCALE, y / SCALE) for x, y in poly]
-        for poly in result
-        if len(poly) >= 3
-    ]
-
-def _extrude_segments_fallback(
-    solids: List,
-    pts: List[Point],
-    half_width: float,
-    stroke_height: float,
-    idx: int,
-    round_top: bool = False,
-) -> None:
-    """Fallback: stroke each edge segment individually so the interior is never filled."""
-    n = len(pts)
-    for i in range(n):
-        p1, p2 = pts[i], pts[(i + 1) % n]
-        if p1 == p2:
-            continue
-        _extrude_open_centerline(solids, [p1, p2], half_width, stroke_height, idx, round_top)
-
-
-def _extrude_open_centerline(
-    solids: List,
-    pts: List[Point],
-    half_width: float,
-    stroke_height: float,
-    idx: int,
-    round_top: bool = False,
-) -> None:
-    """Simplify, stroke, and extrude an open centerline path as a ridge solid."""
-    stroke_polys = stroke_polygons_from_centerline(pts, half_width, closed=False)
-    for poly in stroke_polys:
-        for p2 in clipper_clean_and_simplify(poly, CLIPPER_CLEAN_TOL):
-            p2 = clean_polyline_points(p2, POINT_CLEAN_TOL)
-            if len(p2) < 3:
-                continue
-            if polygon_area(p2) < 0:
-                p2 = list(reversed(p2))
-            try:
-                solids.append(_capped_solid(p2, stroke_height, round_top=round_top))
-            except Exception as e:
-                print(f"    Warning: open image stroke {idx} polygon skipped: {e}")
-
-def _extrude_closed_contour(
-    solids: List,
-    pts: List[Point],
-    half_width: float,
-    stroke_height: float,
-    idx: int,
-    round_top: bool = False,
-) -> None:
-    """
-    Create a RAISED HOLLOW CONTOUR from a closed path.
-
-    Only a narrow ridge around the original path is raised.
-
-    The interior remains at exactly BASE_THICKNESS,
-    i.e. completely flat with the background.
-
-             raised ridge
-             ↓       ↓
-        _____|       |_____
-    ___/                   \\___   <- base plate
-
-       interior stays flat
-    """
-
-    if half_width <= 0 or stroke_height <= 0:
-        return
-
-    pts = clean_polyline_points(pts, POINT_CLEAN_TOL)
-
-    if len(pts) < 3:
-        return
-
-    if pts[0] == pts[-1]:
-        pts = pts[:-1]
-
-    if len(pts) < 3:
-        return
-
-    # Normalize orientation.
-    if polygon_area(pts) < 0:
-        pts = list(reversed(pts))
-
-    # ---------------------------------------------------------
-    # Original contour:
-    #
-    #             P
-    #       ----------------
-    #
-    # We make:
-    #
-    #     outer = P offset by +half_width
-    #     inner = P offset by -half_width
-    #
-    # Raised geometry = OUTER - INNER
-    #
-    # ---------------------------------------------------------
-
-    outer_polys = _offset_closed_polygon(
-        pts,
-        +half_width,
-    )
-
-    inner_polys = _offset_closed_polygon(
-        pts,
-        -half_width,
-    )
-
-    if not outer_polys:
-        print(
-            f"    Warning: closed image stroke {idx}: "
-            f"could not create outer offset"
-        )
-        return
-
-    # Usually there is one outer polygon.
-    # Multiple polygons are supported for robustness.
-    for outer in outer_polys:
-
-        outer = clean_polyline_points(
-            outer,
-            POINT_CLEAN_TOL,
-        )
-
-        if len(outer) < 3:
-            continue
-
-        if polygon_area(outer) < 0:
-            outer = list(reversed(outer))
-
-        try:
-            # Raise the complete OUTER region.
-            outer_solid = _capped_solid(
-                outer,
-                stroke_height,
-                round_top=round_top,
-            )
-
-            ring = cq.Workplane("XY").add(outer_solid)
-
-            # -------------------------------------------------
-            # Remove the middle.
-            #
-            # Start the cutter below the plate top so there is
-            # absolutely no residual raised material inside.
-            # -------------------------------------------------
-
-            for inner in inner_polys:
-
-                inner = clean_polyline_points(
-                    inner,
-                    POINT_CLEAN_TOL,
-                )
-
-                if len(inner) < 3:
-                    continue
-
-                if polygon_area(inner) < 0:
-                    inner = list(reversed(inner))
-
-                cutter = (
-                    cq.Workplane("XY")
-                    .workplane(offset=BASE_THICKNESS - 0.05)
-                    .polyline(inner)
-                    .close()
-                    .extrude(stroke_height + 0.10)
-                )
-
-                ring = ring.cut(cutter)
-
-            solids.append(ring.val())
-
-        except Exception as e:
-
-            print(
-                f"    Warning: hollow closed stroke {idx} failed "
-                f"({e}); using per-segment fallback"
-            )
-
-            # Very robust fallback:
-            # draw every edge independently as a raised line.
-            # This CANNOT fill the center.
-            _extrude_segments_fallback(
-                solids,
-                pts,
-                half_width,
-                stroke_height,
-                idx,
-                round_top,
-            )
-
-def _extrude_closed_contour_old(
-    solids: List,
-    pts: List[Point],
-    half_width: float,
-    stroke_height: float,
-    idx: int,
-    round_top: bool = False,
-) -> None:
-    """
-    Extrude a closed path as a raised contour line (outline).
-    The outer boundary is extruded to `stroke_height`, and the interior
-    is cut away down to base plate height, leaving the interior completely flat.
-    """
-    stroke_polys = stroke_polygons_from_centerline(pts, half_width, closed=True)
-    outers: List[List[Point]] = []
-    inners: List[List[Point]] = []
-
-    for poly in stroke_polys:
-        for p2 in clipper_clean_and_simplify(poly, CLIPPER_CLEAN_TOL):
-            p2 = clean_polyline_points(p2, POINT_CLEAN_TOL)
-            if len(p2) < 3:
-                continue
-            if polygon_area(p2) > 0:
-                outers.append(p2)
-            else:
-                inners.append(list(reversed(p2)))
-
-    if not outers:
-        return
-
-    # If no inner holes exist (e.g. tiny shape smaller than stroke width), extrude outer directly
-    if not inners:
-        for out_poly in outers:
-            try:
-                solids.append(_capped_solid(out_poly, stroke_height, round_top=round_top))
-            except Exception as e:
-                print(f"    Warning: closed stroke {idx} outer solid skipped: {e}")
-        return
-
-    # Extrude hollow contour by subtracting inner hole prisms from the outer solid
-    for out_poly in outers:
-        try:
-            out_solid = _capped_solid(out_poly, stroke_height, round_top=round_top)
-            work = cq.Workplane("XY").add(out_solid)
-            for in_poly in inners:
-                in_poly_clean = clean_polyline_points(in_poly, POINT_CLEAN_TOL)
-                if len(in_poly_clean) < 3:
-                    continue
-                if polygon_area(in_poly_clean) < 0:
-                    in_poly_clean = list(reversed(in_poly_clean))
-                cut_prism = (
-                    cq.Workplane("XY")
-                    .workplane(offset=BASE_THICKNESS - 0.5)
-                    .polyline(in_poly_clean).close()
-                    .extrude(stroke_height + 1.0)
-                )
-                work = work.cut(cut_prism)
-            solids.append(work.val())
-        except Exception as e:
-            print(f"    Warning: boolean cut failed for closed stroke {idx} ({e}), falling back to segment stroking")
-            _extrude_segments_fallback(solids, pts, half_width, stroke_height, idx, round_top)
 
 
 def _extrude_one_centerline(
@@ -902,18 +549,27 @@ def _extrude_one_centerline(
     round_top: bool = False,
 ) -> None:
     """
-    Simplify, stroke, and extrude one centerline path.
-    Closed paths are extruded as raised contour lines with completely flat interiors.
-    Open paths are extruded as solid ridges.
+    Simplify, stroke, and extrude one centerline path as a ridge, appending the
+    resulting solids to `solids`. `round_top` applies a top-edge fillet for a dome
+    profile (only worth it for wide outlines; thin details stay flat).
     """
     pts = rdp_simplify(clean_polyline_points(pts, POINT_CLEAN_TOL), PATH_SIMPLIFY_TOL)
     if len(pts) < 2:
         return
 
-    if is_closed and len(pts) >= 3:
-        _extrude_closed_contour(solids, pts, half_width, stroke_height, idx, round_top=round_top)
-    else:
-        _extrude_open_centerline(solids, pts, half_width, stroke_height, idx, round_top=round_top)
+    stroke_polys = stroke_polygons_from_centerline(pts, half_width, is_closed)
+
+    for poly in stroke_polys:
+        for p2 in clipper_clean_and_simplify(poly, CLIPPER_CLEAN_TOL):
+            p2 = clean_polyline_points(p2, POINT_CLEAN_TOL)
+            if len(p2) < 3:
+                continue
+            if polygon_area(p2) < 0:
+                p2 = list(reversed(p2))
+            try:
+                solids.append(_capped_solid(p2, stroke_height, round_top=round_top))
+            except Exception as e:
+                print(f"    Warning: image stroke {idx} polygon skipped: {e}")
 
 
 def extrude_image_strokes(
@@ -924,9 +580,9 @@ def extrude_image_strokes(
     outline_width:  float = IMAGE_OUTLINE_WIDTH,
 ) -> List:
     """
-    Extrude image paths as dome-topped ridges with a two-tier height hierarchy:
-      - Closed paths with |area| ≥ OUTLINE_MIN_AREA → main outline (taller, wider)
-      - All other paths and open paths       → detail  (shorter, narrower)
+    Extrude image paths as ridges with a two-tier height hierarchy:
+      - Closed paths with |area| ≥ OUTLINE_MIN_AREA → main outline (taller, wider, dome top)
+      - All other paths and open paths               → detail  (shorter, narrower, flat top)
 
     All paths are Douglas-Peucker simplified before extrusion.
     """
@@ -949,25 +605,75 @@ def extrude_image_strokes(
 
     solids: List = []
     idx = 1
-    # Image ridges are thin (≤1.2mm) — flat vs tapered tops are indistinguishable by
-    # touch, and tapering hundreds of them is the dominant build cost on dense art.
-    # So keep image strokes flat; the taper is reserved for the (few) raised-text shapes.
+    # Main outlines get dome tops (few, wide strokes — fillet is worthwhile).
+    # Detail strokes stay flat (many, thin — indistinguishable by touch and faster).
     for pts in closed_paths:
         if abs(polygon_area(pts)) >= OUTLINE_MIN_AREA:
             h, w = outline_height, outline_width
+            _extrude_one_centerline(solids, pts, True, w / 2, h, idx, round_top=True)
         else:
             h, w = IMAGE_DETAIL_HEIGHT, IMAGE_DETAIL_WIDTH
-        _extrude_one_centerline(solids, pts, True, w / 2, h, idx)
+            _extrude_one_centerline(solids, pts, True, w / 2, h, idx, round_top=False)
         idx += 1
 
     for pts in open_paths:
-        _extrude_one_centerline(solids, pts, False, IMAGE_DETAIL_WIDTH / 2, IMAGE_DETAIL_HEIGHT, idx)
+        _extrude_one_centerline(solids, pts, False, IMAGE_DETAIL_WIDTH / 2, IMAGE_DETAIL_HEIGHT, idx, round_top=False)
         idx += 1
 
     for pts in circle_paths:
-        _extrude_one_centerline(solids, pts, True,  IMAGE_DETAIL_WIDTH / 2, IMAGE_DETAIL_HEIGHT, idx)
+        _extrude_one_centerline(solids, pts, True,  IMAGE_DETAIL_WIDTH / 2, IMAGE_DETAIL_HEIGHT, idx, round_top=False)
         idx += 1
 
+    return solids
+
+
+def fill_closed_regions(
+    closed_paths: List[List[Point]],
+    fill_height: float = FILL_HEIGHT,
+) -> List:
+    """
+    Extrude the interior of large closed image paths as a flat raised solid.
+
+    Produces a three-level tactile hierarchy the finger can read:
+        base plate → filled body (fill_height) → outline ridge on top
+
+    The fill height must be less than image_outline_height_mm so the outline
+    ridge stands proud above the body. Only paths with area ≥ OUTLINE_MIN_AREA
+    are filled; small closed paths (eyes, nostrils) are stroked only.
+
+    pyclipper CleanPolygon + SimplifyPolygon handle self-intersecting or
+    degenerate contours from rasterised art before the CadQuery extrude.
+    """
+    if fill_height <= 0:
+        return []
+
+    solids: List = []
+    count = 0
+    for pts in closed_paths:
+        if abs(polygon_area(pts)) < OUTLINE_MIN_AREA:
+            continue
+        pts = clean_polyline_points(pts, POINT_CLEAN_TOL)
+        if len(pts) < 3:
+            continue
+        if polygon_area(pts) < 0:
+            pts = list(reversed(pts))
+        for p2 in clipper_clean_and_simplify(pts, CLIPPER_CLEAN_TOL):
+            p2 = clean_polyline_points(p2, POINT_CLEAN_TOL)
+            if len(p2) < 3:
+                continue
+            if polygon_area(p2) < 0:
+                p2 = list(reversed(p2))
+            try:
+                solid = (cq.Workplane("XY")
+                         .workplane(offset=BASE_THICKNESS)
+                         .polyline(p2).close()
+                         .extrude(fill_height))
+                solids.append(solid.val())
+                count += 1
+            except Exception as e:
+                print(f"    Warning: fill region skipped: {e}")
+
+    print(f"  Fill regions: {count} interiors at {fill_height:.1f}mm")
     return solids
 
 
@@ -1154,6 +860,10 @@ def create_one_page_stl_from_dxf(
         print(f"    [t] braille {time.time() - t0:.1f}s")
 
     if image_dxf and (image_closed or image_open or image_circles):
+        if image_closed:
+            t0 = time.time()
+            parts += fill_closed_regions(image_closed)
+            print(f"    [t] fill regions {time.time() - t0:.1f}s")
         t0 = time.time()
         parts += extrude_image_strokes(
             image_closed, image_open, image_circles,
