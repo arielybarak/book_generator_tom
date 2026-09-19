@@ -14,7 +14,6 @@ export const COPY = {
       headline: 'הופכים משפט לעמוד שאפשר לגעת בו',
       sub: 'כותבים משפט בעברית, מתארים את הציור — ומקבלים עמוד מוכן להדפסה בתלת־ממד, עם ציור בולט, טקסט וברייל. בלי שום ידע טכני.',
       cta: 'בואו ניצור ספר',
-      note: 'מתאים להורים, גננות וכל מי שרוצה לספר סיפור במגע.',
       galleryTitle: 'כך נראה עמוד גמור',
     },
 
@@ -26,11 +25,32 @@ export const COPY = {
       sentencePlaceholder: 'כתבו משפט קצר בעברית…',
       pictureLabel: 'מה רואים בציור?',
       picturePlaceholder: 'תארו במילה־שתיים, למשל: כלב, בית, פרח',
+      pictureHint: 'עד שתי מילים',
+      pictureTooLong: 'אפשר עד שתי מילים בלבד — נסחו מחדש בקצרה.',
+      pictureRequired: 'צריך לכתוב לפחות מילה אחת.',
       addPage: 'הוסיפו עמוד',
       pagesTitle: 'העמודים בספר',
       empty: 'עוד לא הוספתם עמודים',
       generate: 'יוצרים את הספר',
       soundQuestion: 'איך הוגים?',
+      imageModeLabel: 'הציור בעמוד',
+      modeGenerate: 'ציור אוטומטי',
+      modeUpload: 'העלאת ציור',
+      modeNone: 'בלי ציור',
+      uploadCta: 'גררו לכאן קובץ ציור, או לחצו לבחירה',
+      uploadHint: 'PNG או JPG',
+      uploadReplace: 'החליפו ציור',
+      uploadRemove: 'הסירו',
+      uploadError: 'לא הצלחנו לטעון את הקובץ. נסו קובץ תמונה אחר.',
+      uploadProcessing: 'מעבדים…',
+      uploadImageAlt: 'הציור שהעליתם',
+      instructionsTitle: 'לתוצאה הכי טובה:',
+      instructions: [
+        'ציירו על דף לבן וחלק, בקו כהה ובולט (טוש שחור)',
+        'צלמו מלמעלה באור טוב, בלי צללים',
+        'שהציור ימלא את רוב התמונה',
+      ],
+      noneNote: 'העמוד יודפס עם הטקסט והברייל בלבד, בלי ציור.',
     },
 
     generate: {
@@ -42,9 +62,11 @@ export const COPY = {
       failed: 'משהו השתבש ביצירת העמוד. אפשר לנסות שוב.',
       noStl: 'הציור מוכן, אך קובץ ההדפסה נכשל. אפשר לצייר מחדש.',
       allReady: 'כל העמודים מוכנים להורדה',
-      backToEdit: 'חזרה לעריכה',
       retry: 'נסו שוב',
       elapsed: 'זמן היצירה',
+      chooseDrawing: 'שמרנו את כל הציורים — בחרו את זה שאהבתם',
+      option: 'ציור',
+      selected: 'נבחר',
     },
 
     download: {
@@ -66,6 +88,9 @@ export const COPY = {
       arrowNext: '←', // RTL: forward points left
       arrowPrev: '→',
       viewer: 'תצוגה תלת־ממדית של העמוד — אפשר לסובב',
+      loading: 'טוען…',
+      skipToContent: 'דלגו לתוכן',
+      progress: 'התקדמות',
     },
 
     auth: {
@@ -82,13 +107,12 @@ export const COPY = {
       errorSignup: 'ההרשמה נכשלה. ייתכן ששם המשתמש כבר תפוס',
       errorUsername: 'שם המשתמש חייב להכיל לפחות 3 תווים (אותיות, ספרות, _ . -)',
       errorPassword: 'הסיסמה חייבת להכיל לפחות 6 תווים',
+      captchaRequired: 'אנא אשרו שאינכם רובוט',
     },
 
     about: {
       navLabel: 'אודות',
       title: 'אודות הפרויקט',
-      intro:
-        'הכלי הזה הופך משפט קצר לעמוד סיפור שאפשר לגעת בו — ציור בולט, כתב מובלט וברייל, מוכנים להדפסה בתלת־ממד.',
       missionTitle: 'מי אנחנו',
       missionBody:
         'TOM — Tikkun Olam Makers — היא תנועה עולמית של מתנדבים: מפתחים, מעצבים ואנשי מקצוע שנרתמים יחד ליצירת פתרונות לאנשים עם מוגבלויות, ומשתפים אותם בחינם עם כל מי שזקוק להם.',
@@ -97,6 +121,8 @@ export const COPY = {
         'הפרויקט נוצר יחד עם עמותת אלי״ה, התומכת בילדים עיוורים ולקויי ראייה בישראל, מתוך רצון פשוט: שכל הורה יוכל להכין לילד שלו ספר שקוראים בידיים. כותבים משפט, מתארים ציור — ומקבלים עמוד מוחשי שאפשר להדפיס בבית או במעבדת הדפסה.',
       linkCta: 'לאתר TOM — Tikkun Olam Makers',
       logoAlt: 'TOM — Tikkun Olam Makers',
+      teamTitle: 'הצוות',
+      emailLabel: 'אימייל',
       back: 'חזרה ליצירת הספר',
     },
 
@@ -115,7 +141,6 @@ export const COPY = {
       headline: 'Turn a sentence into a page you can touch',
       sub: 'Write a sentence, describe the picture — and get a 3D-printable page with a raised drawing, text and Braille. No technical knowledge needed.',
       cta: 'Let’s make a book',
-      note: 'For parents, teachers and anyone who wants to tell a story by touch.',
       galleryTitle: 'This is what a finished page looks like',
     },
 
@@ -127,11 +152,32 @@ export const COPY = {
       sentencePlaceholder: 'Write a short word or sentence…',
       pictureLabel: 'What’s in the picture?',
       picturePlaceholder: 'A word or two, e.g. dog, house, flower',
+      pictureHint: 'Up to two words',
+      pictureTooLong: 'Up to two words only — please shorten it.',
+      pictureRequired: 'Please enter at least one word.',
       addPage: 'Add page',
       pagesTitle: 'Pages in the book',
       empty: 'No pages added yet',
       generate: 'Create the book',
       soundQuestion: 'How is it pronounced?',
+      imageModeLabel: 'Picture on the page',
+      modeGenerate: 'Auto drawing',
+      modeUpload: 'Upload a drawing',
+      modeNone: 'No drawing',
+      uploadCta: 'Drag a drawing here, or click to choose',
+      uploadHint: 'PNG or JPG',
+      uploadReplace: 'Replace drawing',
+      uploadRemove: 'Remove',
+      uploadError: 'We couldn’t load that file. Try another image.',
+      uploadProcessing: 'Processing…',
+      uploadImageAlt: 'The drawing you uploaded',
+      instructionsTitle: 'For the best result:',
+      instructions: [
+        'Draw on smooth white paper with a dark, bold line (black marker)',
+        'Photograph it from above in good light, no shadows',
+        'Let the drawing fill most of the frame',
+      ],
+      noneNote: 'The page will be printed with the text and Braille only, no drawing.',
     },
 
     generate: {
@@ -143,9 +189,11 @@ export const COPY = {
       failed: 'Something went wrong creating the page. You can try again.',
       noStl: 'The drawing is ready, but the print file failed. You can redraw.',
       allReady: 'All pages are ready to download',
-      backToEdit: 'Back to editing',
       retry: 'Try again',
       elapsed: 'Generation time',
+      chooseDrawing: 'We kept every drawing — pick the one you like',
+      option: 'Drawing',
+      selected: 'Selected',
     },
 
     download: {
@@ -167,6 +215,9 @@ export const COPY = {
       arrowNext: '→', // LTR: forward points right
       arrowPrev: '←',
       viewer: '3D preview of the page — you can rotate it',
+      loading: 'Loading…',
+      skipToContent: 'Skip to content',
+      progress: 'Progress',
     },
 
     auth: {
@@ -183,13 +234,12 @@ export const COPY = {
       errorSignup: 'Sign-up failed. That username may already be taken',
       errorUsername: 'Username must be at least 3 characters (letters, digits, _ . -)',
       errorPassword: 'Password must be at least 6 characters',
+      captchaRequired: 'Please confirm you’re not a robot',
     },
 
     about: {
       navLabel: 'About',
       title: 'About the project',
-      intro:
-        'This tool turns a short sentence into a story page you can touch — a raised drawing, embossed text and Braille, ready for 3D printing.',
       missionTitle: 'Who we are',
       missionBody:
         'TOM — Tikkun Olam Makers — is a global movement of volunteers: makers, designers and professionals who join forces to create solutions for people with disabilities, and share them freely with anyone who needs them.',
@@ -198,6 +248,8 @@ export const COPY = {
         'The project was created together with Eliya, an Israeli organization supporting blind and visually-impaired children, out of a simple wish: that every parent could make their child a book that is read with the hands. Write a sentence, describe a picture — and get a tactile page you can print at home or at a printing lab.',
       linkCta: 'Visit TOM — Tikkun Olam Makers',
       logoAlt: 'TOM — Tikkun Olam Makers',
+      teamTitle: 'The team',
+      emailLabel: 'Email',
       back: 'Back to your book',
     },
 

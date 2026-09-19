@@ -16,11 +16,19 @@ export function AuthProvider({ children }) {
     return () => sub.subscription.unsubscribe()
   }, [])
 
-  const signIn = (username, password) =>
-    supabase.auth.signInWithPassword({ email: usernameToEmail(username), password })
+  const signIn = (username, password, captchaToken) =>
+    supabase.auth.signInWithPassword({
+      email: usernameToEmail(username),
+      password,
+      ...(captchaToken ? { options: { captchaToken } } : {}),
+    })
 
-  const signUp = (username, password) =>
-    supabase.auth.signUp({ email: usernameToEmail(username), password })
+  const signUp = (username, password, captchaToken) =>
+    supabase.auth.signUp({
+      email: usernameToEmail(username),
+      password,
+      ...(captchaToken ? { options: { captchaToken } } : {}),
+    })
 
   const signOut = () => supabase.auth.signOut()
 

@@ -8,6 +8,27 @@
       name="description"
       content="TOM — יוצרים ספרי מישוש לילדים עיוורים. כותבים משפט בעברית ומקבלים עמוד מוכן להדפסה בתלת־ממד."
     />
+    <meta name="theme-color" content="#ea580c" />
+    <link rel="apple-touch-icon" href="/tom-logo-full.png" />
+
+    <!-- Social / link-share preview. NOTE: og:url + og:image should be ABSOLUTE URLs
+         (https://<prod-domain>/…) for WhatsApp/Facebook — set once the domain is fixed. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="TOM" />
+    <meta property="og:title" content="TOM · יוצרים ספרי מישוש" />
+    <meta
+      property="og:description"
+      content="כותבים משפט בעברית ומקבלים עמוד סיפור מוחשי — ציור בולט, כתב וברייל, מוכן להדפסה בתלת־ממד."
+    />
+    <meta property="og:image" content="/tom-logo-full.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="TOM · יוצרים ספרי מישוש" />
+    <meta
+      name="twitter:description"
+      content="כותבים משפט בעברית ומקבלים עמוד סיפור מוחשי — ציור בולט, כתב וברייל, מוכן להדפסה בתלת־ממד."
+    />
+    <meta name="twitter:image" content="/tom-logo-full.png" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -18,6 +39,31 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Stale-build self-heal — runs BEFORE the app bundle so it can catch the
+      // bundle itself failing to load. A cached index.html can point at a build
+      // hash that no longer exists after a deploy; the module script then 404s and
+      // the page renders blank ("can't enter the site"). Reload once to pull the
+      // fresh index.html. Guarded by sessionStorage (same key as lib/reload.js) so
+      // a genuinely-broken build can never loop-reload.
+      ;(function () {
+        window.addEventListener(
+          'error',
+          function (e) {
+            var el = e && e.target
+            if (!el || el.tagName !== 'SCRIPT' || el.type !== 'module') return
+            try {
+              if (sessionStorage.getItem('tom_stale_reload')) return
+              sessionStorage.setItem('tom_stale_reload', '1')
+            } catch (_) {
+              return
+            }
+            location.reload()
+          },
+          true, // capture: resource-load error events don't bubble
+        )
+      })()
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

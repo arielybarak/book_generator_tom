@@ -224,6 +224,40 @@ def png_to_dxf(png_path, dxf_path, canvas_cm=150):
     doc.saveas(dxf_path)
 
 
+def clean_uploaded_image_to_png(src_path, out_png_path, max_side=1600):
+    """
+    Best-effort cleanup of a *user-supplied* drawing (phone photo or scan, JPG or PNG)
+    into a clean black-on-white line PNG that png_to_dxf() can trace.
+
+    Unlike png_to_dxf's fixed threshold (fine for crisp digital line art), a photo has
+    uneven lighting and paper texture, so we use an adaptive threshold + morphology +
+    despeckle. Output is dark lines on a white ground (what png_to_dxf expects).
+    """
+    img = cv2.imread(src_path, cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        raise RuntimeError(f"Could not load uploaded image {src_path}")
+
+    # Downscale oversized photos — keeps tracing fast and stable (detail beyond this
+    # is noise for tactile line art anyway).
+    h, w = img.shape[:2]
+    if max(h, w) > max_side:
+        s = max_side / float(max(h, w))
+        img = cv2.resize(img, (int(round(w * s)), int(round(h * s))), interpolation=cv2.INTER_AREA)
+
+    blur = cv2.GaussianBlur(img, (5, 5), 0)
+    # Dark strokes on light paper → INV gives white strokes on black for morphology.
+    binary = cv2.adaptiveThreshold(
+        blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 7
+    )
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    binary = cv2.medianBlur(binary, 3)  # drop isolated specks from paper grain
+
+    # png_to_dxf wants dark lines on white → invert back.
+    cv2.imwrite(out_png_path, cv2.bitwise_not(binary))
+    return out_png_path
+
+
 def _filled_glyphs_to_dxf(image_bw, out_path, canvas_cm=150):
     """
     Convert a rendered-text image to a DXF of SOLID glyph outlines.

@@ -25,7 +25,7 @@ export function Landing({ onStart }) {
           <motion.p
             custom={0}
             variants={fade}
-            className="bg-accent-soft text-accent mb-3 inline-block rounded-full px-4 py-1 text-sm font-semibold"
+            className="bg-accent-soft text-accent-text mb-3 inline-block rounded-full px-4 py-1 text-sm font-semibold"
           >
             {t.tagline}
           </motion.p>
@@ -44,7 +44,6 @@ export function Landing({ onStart }) {
               {t.landing.cta}
               <span aria-hidden="true">{t.common.arrowNext}</span>
             </Button>
-            <p className="text-muted mt-4 text-sm">{t.landing.note}</p>
           </motion.div>
         </motion.div>
 

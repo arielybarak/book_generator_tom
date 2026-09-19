@@ -9,7 +9,9 @@ Young blind children lack illustrated storybooks. While sighted toddlers enjoy p
 - The Hebrew word in raised text (for sighted adults reading alongside)
 - The Braille transliteration for the child to read independently
 
-The output is a ready-to-print STL file with distinct tactile height layers.
+The output is a ready-to-print STL file with distinct tactile height layers. The line-art
+image can be **auto-generated** (Stable Diffusion), **uploaded** by the user (their own drawing),
+or **omitted** (a text + Braille page) — chosen per page.
 
 ---
 
@@ -64,6 +66,8 @@ as a guide to which engine is live; see `PROGRESS.md` for the full migration his
 The backend runs on **Hugging Face Spaces** (GPU via ZeroGPU). The Space is its own git repo, included here as the **`hf_space/` submodule**. `hf_space/gradio_app_lithophane.py` is the deployed entry point (see "STL engine" above for why the name is misleading); it is self-contained (bundles its own `src/`, `config.yaml`, `requirements.txt`).
 
 > **Editing the Space:** edit inside `hf_space/`, then `git commit` + `git push` from that folder — HF auto-rebuilds on push. The repo-root `src/` is kept for the notebooks and CLI/FlowManager; run `./sync_to_space.sh` to mirror changes into `hf_space/`.
+>
+> **Two separate remotes, two separate pushes.** `git push` from the repo root only updates GitHub — it never touches the live Space. The Space only rebuilds when you `git push` from *inside* `hf_space/` (its own repo, own remote on huggingface.co). If you change `src/` or `config.yaml` and only push from root, the deployed app is untouched.
 
 ### Frontend — React web app
 
@@ -91,8 +95,13 @@ serverless function, `web/api/generate.js`, which:
 
 | | |
 |---|---|
-| **Inputs** | `raw_text`, `variations` (nikud choices JSON), `image_desc`, `object_class`, `language` (`"hebrew"` \| `"english"`) |
-| **Outputs** | `image` (PNG file URL), `stl` (STL file URL) |
+| **Inputs** | `raw_text`, `variations` (nikud choices JSON), `image_desc`, `object_class`, `language` (`"hebrew"` \| `"english"`), `image_mode`, `image_data` |
+| **Outputs** | `image` (PNG file URL, `null` when `image_mode` is `none`), `stl` (STL file URL) |
+
+`image_mode` selects the page's picture source: **`generate`** (Stable Diffusion, default),
+**`upload`** (the user's own drawing, sent as a base64 data URL in `image_data`), or **`none`**
+(text + Braille only). Only `generate` uses the GPU. The 7 inputs are positional and must stay
+in sync across `web/src/api/hfClient.js`, `web/api/generate.js`, and the Space's `generate_page`.
 
 Client-side call sites: `web/src/api/hfClient.js` (wake-up + SSE streaming) and
 `web/api/generate.js` (authenticated enqueue). Full contract details in

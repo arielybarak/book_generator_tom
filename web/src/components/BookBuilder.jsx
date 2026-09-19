@@ -10,7 +10,7 @@ import { useLang } from '../lib/i18n'
  * Book state is lifted to App; this is a controlled view. The page language
  * follows the global UI language (header switcher), so there's no per-book toggle.
  */
-export function BookBuilder({ book, setBook, onGenerate }) {
+export function BookBuilder({ book, setBook, onGenerate, onBack }) {
   const { t } = useLang()
 
   function setTitle(title) {
@@ -74,7 +74,21 @@ export function BookBuilder({ book, setBook, onGenerate }) {
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-ink truncate font-semibold">{p.text}</p>
-                    {p.picture && <p className="text-muted truncate text-sm">🖼 {p.picture}</p>}
+                    {(!p.imageMode || p.imageMode === 'generate') && p.picture && (
+                      <p className="text-muted truncate text-sm">
+                        <span aria-hidden="true">🖼</span> {p.picture}
+                      </p>
+                    )}
+                    {p.imageMode === 'upload' && (
+                      <p className="text-muted truncate text-sm">
+                        <span aria-hidden="true">⬆</span> {t.builder.modeUpload}
+                      </p>
+                    )}
+                    {p.imageMode === 'none' && (
+                      <p className="text-muted truncate text-sm">
+                        <span aria-hidden="true">∅</span> {t.builder.modeNone}
+                      </p>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -91,7 +105,12 @@ export function BookBuilder({ book, setBook, onGenerate }) {
         </ul>
       )}
 
-      <div className="mt-8 flex justify-center">
+      <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+        {onBack && (
+          <Button size="lg" variant="ghost" onClick={onBack}>
+            <span aria-hidden="true">{t.common.arrowPrev}</span> {t.common.back}
+          </Button>
+        )}
         <Button size="lg" onClick={onGenerate} disabled={!canGenerate}>
           {t.builder.generate} <span aria-hidden="true">{t.common.arrowNext}</span>
         </Button>

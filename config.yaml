@@ -7,7 +7,7 @@
 plate:
   width_mm: 150.0
   height_mm: 150.0
-  thickness_mm: 0.4           # thin backing — tactile features sit on top
+  thickness_mm: 1.0           # thin backing — tactile features sit on top
   corner_radius_mm: 10.0
   content_margin_mm: 10.0     # clear border around all content
 
@@ -22,7 +22,7 @@ layout:
 tactile:
 
   # Height hierarchy — taller = more prominent to touch
-  image_outline_height_mm: 1.2   # main contours (tallest — primary shapes to trace)
+  image_outline_height_mm: 2.2   # main contours (tallest — primary shapes to trace)
   fill_height_mm: 1.0            # solid interior fill — sits below the outline ridge
   image_detail_height_mm: 0.8    # inner / secondary lines (eyes, nostrils, etc.)
   text_height_mm: 1.0            # raised Hebrew text (sighted adult reads aloud)
@@ -74,7 +74,7 @@ geometry:
 
 # Optional mounting holes (disabled by default)
 mounting_holes:
-  enabled: false
+  enabled: true
   radius_mm: 2.0
   count: 3
   margin_right_mm: 7.0
