@@ -652,7 +652,14 @@ def fill_closed_regions(
     for pts in closed_paths:
         if abs(polygon_area(pts)) < OUTLINE_MIN_AREA:
             continue
-        pts = clean_polyline_points(pts, POINT_CLEAN_TOL)
+        # Raw raster contours carry pixel-level zigzag that bunches up at sharp
+        # concave notches (e.g. a star's points). Without RDP simplification here
+        # (already applied to outline strokes in _extrude_one_centerline), that
+        # jaggedness survives into pyclipper's clean/simplify and can nick the
+        # polygon into a near-self-intersecting shape, causing CadQuery's face
+        # build to silently throw and the fill to be skipped for exactly the
+        # complex/concave shapes that need it most.
+        pts = rdp_simplify(clean_polyline_points(pts, POINT_CLEAN_TOL), PATH_SIMPLIFY_TOL)
         if len(pts) < 3:
             continue
         if polygon_area(pts) < 0:
