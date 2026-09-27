@@ -39,7 +39,9 @@ tactile:
   # Dome cross-section profile
   # Fillet radius applied to top edges of each stroke solid = height × this ratio.
   # 0.45 gives a near-semicircle feel; 0.0 disables rounding.
-  edge_fillet_enabled: true
+  # Off: filleting per-segment outline strokes yields a degenerate solid (bbox ~1e10mm)
+  # that raises no error but makes STL export hang forever.
+  edge_fillet_enabled: false
   stroke_dome_fillet_ratio: 0.45
 
   # Douglas-Peucker simplification applied to all contour paths before extrusion.
